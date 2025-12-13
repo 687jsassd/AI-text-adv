@@ -584,6 +584,31 @@ class GameEngine:
         self.history_descriptions.append(self.current_description)
         return 0
 
+    def think_go_game(self, think_context):
+        """玩家思考游戏中的情况"""
+        prompt = self.prompt_manager.get_think_prompt(
+            think_context,
+            self.player_name,
+            self.current_description,
+            "\n".join(
+                [str(s) for s in self.history_simple_summaries[:-1] if s is not None]),
+            self.custom_config.get_custom_prompt(),
+            self.get_inventory_text_for_prompt(),
+            self.get_attribute_text(),
+            self.get_situation_text())
+        self.anime_loader.stop_animation()
+        self.anime_loader.start_animation("dot", message="思考中")
+        res = self.call_ai(prompt)
+        while not res:
+            input(f"AI响应失败，按任意键重试.[注意Token消耗{self.total_tokens}]")
+            res = self.call_ai(prompt)
+        self.current_description += "\n\n" + \
+            COLOR_BLUE+f"[思考:{think_context}] "+COLOR_RESET+res
+        self.history_descriptions[-1] = self.current_description
+        self.token_consumes.append(self.l_p_token+self.l_c_token)
+        self.anime_loader.stop_animation()  # type:ignore
+        return 0
+
     def get_token_stats(self):
         return {
             "本次输入消耗": self.l_p_token,
@@ -598,7 +623,13 @@ class GameEngine:
         """获取当前道具列表的文本描述"""
         if not self.inventory:
             return "当前没有道具"
-        return f"当前道具列表（{len(self.inventory)}）：\n" + "\n".join([f"{COLOR_YELLOW}{item}{COLOR_RESET}: {desc}" for item, desc in self.inventory.items()])
+        nums_text = f"{len(self.inventory)}" if len(
+            self.inventory) <= 25 else f"{len(self.inventory)},但其中{len(self.inventory)-25}个道具不会参与剧情。如想，尝试丢弃物品？"
+        available_items = self.inventory.items() if len(
+            self.inventory) <= 25 else list(self.inventory.items())[-25:]
+        no_available_items = list(self.inventory.items())[:-25] if len(
+            self.inventory) > 25 else []
+        return f"当前道具列表（{nums_text}）：\n" + "\n".join([f"{COLOR_YELLOW}{item}{COLOR_RESET}: {desc}" for item, desc in available_items] + [f"{COLOR_RED}[✘]{item}{COLOR_RESET}: {desc}" for item, desc in no_available_items])
 
     def get_attribute_text(self, colorize=False):
         """获取当前属性列表的文本描述"""

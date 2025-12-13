@@ -53,7 +53,7 @@ class PromptManager:
                 * value: 指令值，格式根据command而定。
                     - add_item: 值为对象{道具名: 道具描述}
                     - remove_item: 值为道具名称。
-                    - change_attribute: 改变主角的属性 
+                    - change_attribute: 改变主角的属性
                         - value: 对象{属性名: 变动值}，属性名同main_factor，变动值为正数为加，负数为减。
                         - desc: 属性变化的原因。
                     - change_situation_value: 改变形势值
@@ -95,7 +95,8 @@ class PromptManager:
         9. 一般物品、中间物品、消耗品在使用、更新、消耗时，一定要移除！长线剧情线索物品、关键物品、心得、技能、学会的武功与纪念性物品等均建议保留，但要常更新。
         10. 随剧情、选择、检定结果变更形势值。当出现遭遇类事件时，允许大幅度变更形势。
         11. 生成选项只参考当前已知剧情，不可剧透未知信息。
-        12. 获得或失去任何物品都要剧情明确说明！不要因为选项可能需要操作就提前写指令进行了操作。
+        12. 获得或失去任何物品都要剧情明确说明！
+        13. 判断玩家的操作是否合理，禁止不合理的操作。
         """
 
         # 用户故事
@@ -115,14 +116,15 @@ class PromptManager:
         游戏开始,玩家名为{player_name},请从某场景和开篇故事开始游戏。
         开篇故事应当揭露这是一个有什么特别之处的世界，玩家开局位置，为什么来到的（如果是穿越，可以略写几笔带过），玩家的目标（如有）是什么。可能会有NPC。
         注意：如果玩家初始有物品，那么一定要用指令进行添加！
-        
+
         """
         full_prompt = f"""
         {self.prompts_sections["system_role"]}
         {self.prompts_sections["world_rules"]}
         {self.prompts_sections["output_format"]}
-        
-        {"主角的初始背景故事"+self.prompts_sections["user_story"] if self.prompts_sections["user_story"] else ""}
+
+        {"主角的初始背景故事"+self.prompts_sections["user_story"]
+            if self.prompts_sections["user_story"] else ""}
         {inventory_text+' 注意,物品名包括所有标点符号'}
         {attribute_text}
         {custom_prompt}
@@ -149,13 +151,14 @@ class PromptManager:
         {situation_text}
         {player_name}的动作是:{player_choice}，
         {"执行动作后：" if choice_preview else ""}{choice_preview}
+        玩家的动作是不合理则避免其剧情走向。
         根据实际给出1-6个选项，类型不一，难度有难有易。
-        生成的选项不一定会被选择，选项中若需要变动物品等，一定不要在当前的commands里面写，而是当玩家确实选择了那个选项时在下一轮写。
+        生成的选项不一定会被选择，选项若需要变动物品等，不要在当前的commands里面写，而是当玩家确实选择了那选项时在下一轮写。
         经常使用指令变动物品，应符合逻辑。
         根据剧情与行动合理地偶尔改变若干属性。
         变更形势值。
         不要包含上一轮场景的描述；直接给出追加发展的新剧情。
-        
+
         """
         full_prompt = f"""
         {self.prompts_sections["world_rules"]}
@@ -170,8 +173,28 @@ class PromptManager:
         """获取总结摘要提示词"""
         summary_prompt = f"""
         在沉浸式的游戏环境中，目前大段剧情积累了很多摘要，
-        {"主角的初始背景故事"+self.prompts_sections["user_story"] if self.prompts_sections["user_story"] else ""}
+        {"主角的初始背景故事"+self.prompts_sections["user_story"]
+            if self.prompts_sections["user_story"] else ""}
         {self.prompts_sections["summary_prompt"]}
         摘要：{summary}.
         """
         return summary_prompt
+
+    def get_think_prompt(self, think_context: str, player_name: str, cur_desc: str, previous_description: str, custom_prompt: str = "", inventory_text: str = "", attribute_text: str = "", situation_text: Optional[str] = ""):
+        """获取思考提示词"""
+        think_context = f"""
+        历史: {previous_description}
+        {inventory_text}
+        {attribute_text}
+        场景：{cur_desc}
+        {situation_text}
+        {custom_prompt}
+        {player_name}此时正在思考/联想:{think_context}
+        你顺延玩家的思考方向，给出符合沉浸式游戏环境的玩家思考内容。
+        玩家并非全知，思考需要参考剧情、物品、属性。
+        思考时剧情暂停，不要在思考中发展剧情、透露新场景、新物品等。
+        可以参考玩家的属性来给出不同深度的思考，但思考仍然受限。
+        不要在思考中包含任何与游戏机制相关的词（如场景描述、判定、属性等）
+        直接给出150字以内的思考内容文本，不要带有任何前缀或者后缀。
+        """
+        return think_context

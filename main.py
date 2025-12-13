@@ -11,7 +11,13 @@ from animes import typewriter_narrative, show_loading_animation, SyncLoadingAnim
 
 config = CustomConfig()
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
+
+extra_datas = {
+    "turn": 0,
+    "think_count_remain": 0,
+}
+
 # 显示函数
 
 
@@ -117,7 +123,8 @@ def save_game(game_engine, save_name="autosave", is_manual_save=False):
             },
             "character_attributes": game_engine.character_attributes,
             "situation_value": game_engine.situation,
-            "token_consumes": game_engine.token_consumes
+            "token_consumes": game_engine.token_consumes,
+            "extra_datas": extra_datas,
         }
 
         # 生成文件名
@@ -172,6 +179,7 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
     """
     从文件加载游戏状态
     """
+    global extra_datas
     try:
         save_dir = "saves"
 
@@ -248,6 +256,7 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
         game_engine.custom_config.base_urls_choice = config_data["base_urls_choice"]
         game_engine.custom_config.model_names_choice = config_data["model_names_choice"]
         game_engine.custom_config.api_keys_choice = config_data["api_keys_choice"]
+        extra_datas = save_data["extra_datas"]
 
         timestamp = datetime.fromisoformat(
             save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
@@ -445,7 +454,7 @@ def display_options(GAME: GameEngine):
                 print(f"[{COLOR_YELLOW}?{COLOR_RESET}]", end="")
                 has_event = True
             else:
-                print(f"[{COLOR_GREEN}^{COLOR_RESET}]", end="")
+                print(f"[{COLOR_GREEN}▲{COLOR_RESET}]", end="")
                 has_goods = True
         elif opt["type"] == "must":
             if chara_attrs.get(opt["main_factor"], 0) >= opt["difficulty"]:
@@ -465,7 +474,7 @@ def display_options(GAME: GameEngine):
     if has_event:
         print(f"[{COLOR_YELLOW}?{COLOR_RESET}] {COLOR_YELLOW}中等检定{COLOR_RESET}")
     if has_goods:
-        print(f"[{COLOR_GREEN}^{COLOR_RESET}] {COLOR_GREEN}简单检定{COLOR_RESET}")
+        print(f"[{COLOR_GREEN}▲{COLOR_RESET}] {COLOR_GREEN}简单检定{COLOR_RESET}")
     print("输入help 查看帮助")
     print('-'*30)
 
@@ -475,7 +484,7 @@ def get_user_input_and_go(GAME: GameEngine):
         loader = show_loading_animation("dot", message="整理中")
         loader.stop_animation()  # type:ignore
         user_input = input(":: ")
-        if user_input in ['exit', 'inv', 'attr', 'add_item', 'remove_item', 'conclude_summary', 'help', 'summary', 'save', 'load', 'new', 'config', 'show_init_resp', 'fix_item_name', 'ana_token']:
+        if user_input in ['exit', 'think', 'inv', 'attr', 'add_item', 'remove_item', 'conclude_summary', 'help', 'summary', 'save', 'load', 'new', 'config', 'show_init_resp', 'fix_item_name', 'ana_token']:
             return user_input
         if user_input.isdigit() and 1 <= int(user_input) <= len(GAME.current_options):
             display_narrative(
@@ -658,17 +667,19 @@ def analyze_token_consume(GAME: GameEngine):
 
 
 def new_game(no_auto_load=False):
+    global extra_datas
     anime_loader = SyncLoadingAnimation()
     GAME = GameEngine(config)
+    extra_datas = {"turns": 0,
+                   "think_count_remain": 0}
     clear_screen()
     anime_loader.start_animation("spinner", message="读取中")
     show_init_resp = False
     if not no_auto_load:
-        loadsuccess, turns, message = load_game(GAME)
+        loadsuccess, _, message = load_game(GAME)
         print(message)
     else:
         loadsuccess = False
-        turns = 0
     anime_loader.stop_animation()
     if not loadsuccess:
         input("按任意键开始配置游戏参数,配置完毕后，将设置主角初始属性,之后游戏开始。")
@@ -677,17 +688,17 @@ def new_game(no_auto_load=False):
         # 设定属性
         while True:
             attrs = input(
-                "依次输入6个整数来决定你的属性(力、敏、智、感、魅、运;一般建议均在5到20之间,默认均为10)\n::")
+                "依次输入6个数来决定你的属性(力、敏、智、感、魅、运;一般建议均在5到20之间,默认均为10)\n::")
             if attrs.strip() == "":
                 break
             attrs = attrs.split()
             if len(attrs) != 6:
-                print("请输入6个整数")
+                print("请输入6个数")
                 continue
             try:
-                attrs = [int(it) for it in attrs]
+                attrs = [float(it) for it in attrs]
             except ValueError:
-                print("请输入6个整数")
+                print("请输入6个数")
                 continue
             for key, val in zip(GAME.character_attributes.keys(), attrs):
                 GAME.character_attributes[key] = val
@@ -697,9 +708,16 @@ def new_game(no_auto_load=False):
         anime_loader.start_animation("spinner", message="*等待<世界>回应*")
         GAME.start_game()
         anime_loader.stop_animation()
+        # 思考次数
+        extra_datas["think_count_remain"] = int(max(
+            min(GAME.character_attributes["INT"]//8, 4), -1)) + 1
+        # 游戏ID
+        if not GAME.game_id:
+            GAME.game_id = generate_game_id()
     no_repeat_sign = False  # 运行指令后，原本的文字不再打字机效果输出
+
     while GAME.current_game_status == "ongoing":
-        turns += 1
+        extra_datas["turns"] += 1
         clear_screen()
         print_all_history(GAME)
         if not no_repeat_sign:
@@ -728,7 +746,7 @@ def new_game(no_auto_load=False):
             return 'exit'
         elif user_input == "inv":
             print(GAME.get_inventory_text())
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "summary":
@@ -736,26 +754,26 @@ def new_game(no_auto_load=False):
             print("摘要")
             print("\n".join(
                 [f"{i+1}. {it}" for i, it in enumerate(list(GAME.history_simple_summaries))]))
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "conclude_summary":
             GAME.go_game("", False, True)
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("总结完成，按任意键继续...")
             continue
         elif user_input == "attr":
             print(GAME.get_attribute_text(colorize=True))
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "save":
             manual_save(GAME)
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "load":
-            loadsuccess, turns = manual_load(GAME)
+            loadsuccess, _ = manual_load(GAME)
             if loadsuccess:
                 print("成功加载，按任意键继续...")
                 no_repeat_sign = False  # 加载游戏成功，重新启用打字机效果
@@ -765,18 +783,20 @@ def new_game(no_auto_load=False):
                 continue
         elif user_input == "config":
             config_game()
+            extra_datas["turns"] -= 1
+            continue
         elif user_input == "new":
             return 'new_game'
         elif user_input == "show_init_resp":
             show_init_resp = not show_init_resp
             print(f"将显示AI原始响应与Token信息：{show_init_resp}")
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "fix_item_name":
             GAME.fix_item_name_error()
             print("道具名修复完成")
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "add_item":
@@ -786,7 +806,7 @@ def new_game(no_auto_load=False):
             print(f"添加道具{item_name}成功")
             GAME.history_simple_summaries.append(
                 f"添加了道具{item_name}:{item_desc}")
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "remove_item":
@@ -798,16 +818,32 @@ def new_game(no_auto_load=False):
                 GAME.history_simple_summaries.append(f"丢弃了道具{item_name}")
             else:
                 print(f"道具{item_name}不存在")
-            turns -= 1
+            extra_datas["turns"] -= 1
             input("按任意键继续...")
             continue
         elif user_input == "ana_token":
             analyze_token_consume(GAME)
-            turns -= 1
+            extra_datas["turns"] -= 1
+            continue
+        elif user_input == "think":
+            if extra_datas["think_count_remain"] <= 0:
+                input("你无法再思考了，做出决定吧.(按任意键继续)")
+                extra_datas["turns"] -= 1
+                continue
+            content = input(
+                f"你思索某个疑问(当前思考次数还剩{int(extra_datas['think_count_remain'])}次) 不输入内容以放弃思考:\n:: ")
+            if content.strip() == "":
+                input("你放弃了思考.(按任意键继续)")
+                extra_datas["turns"] -= 1
+                continue
+            GAME.think_go_game(content)
+            extra_datas["think_count_remain"] -= 1
+            extra_datas["turns"] -= 1
+            input("思考完成，按任意键继续...")
             continue
 
         elif user_input == "help":
-            turns -= 1
+            extra_datas["turns"] -= 1
             print("可用指令：")
             print("exit: 退出游戏")
             print("inv: 查看道具")
@@ -820,6 +856,7 @@ def new_game(no_auto_load=False):
             print('new:新游戏')
             print('config:配置游戏')
             print('custom:自定义行动')
+            print('think:思考/联想')
             print('attr:显示属性')
             print('ana_token:统计token数据')
             print('fix_item_name:修复道具名中的错误')
@@ -828,10 +865,12 @@ def new_game(no_auto_load=False):
             continue
         else:
             no_repeat_sign = False  # 推进了剧情，重新启用打字机效果
+            extra_datas["think_count_remain"] = int(max(
+                min(GAME.character_attributes["INT"]//8, 4), -1)) + 1  # 重置思考次数
 
     clear_screen()
     print("游戏结束,下面是你本局游戏的摘要")
-    print(f"你共进行了{turns}轮游戏")
+    print(f"你共进行了{extra_datas['turns']}轮游戏")
     for turn, it in enumerate(GAME.history_simple_summaries):
         print(f"第{turn+1}轮：{it}")
     input("按任意键退出...")

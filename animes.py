@@ -234,7 +234,7 @@ def show_loading_animation(animation_type: str = "spinner",
 
 
 def typewriter_effect(text: str,
-                      delay: float = 0.04,
+                      delay: float = 0.03,
                       newline_delay: float = 0.1,
                       on_char_typed: Optional[Callable] = None,
                       on_complete: Optional[Callable] = None) -> bool:
