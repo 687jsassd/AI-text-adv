@@ -428,6 +428,7 @@ class GameEngine:
         # self.conversation_history.append(
         #    {"role": "assistant", "content": ai_response})
         self.history_descriptions.append(self.current_description)
+        self.token_consumes.append(self.l_p_token+self.l_c_token)
 
     def go_game(self, option_id, is_custom=False, is_prompt_concluding=False):
         if len(self.history_simple_summaries) > self.summary_conclude_val and not is_prompt_concluding and self.conclude_summary_cooldown < 1:
