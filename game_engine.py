@@ -26,7 +26,7 @@ class GameEngine:
         self.current_description = "游戏开始"
         self.current_options = []
         self.current_game_status = "ongoing"
-        self.summary_conclude_val = 32  # 当历史剧情超过50条时，对其进行压缩总结;所有摘要都会参与剧情生成.
+        self.summary_conclude_val = 25  # 当历史剧情超过25条时，对其进行压缩总结;所有摘要都会参与剧情生成.
 
         # Token统计部分
         self.total_prompt_tokens = 0
@@ -436,7 +436,7 @@ class GameEngine:
         prompt = ""
         if is_prompt_concluding:
             # 当所有摘要都经过了压缩，我们采取稀释旧摘要策略
-            if not any(i and len(i) < 450 for i in self.history_simple_summaries):
+            if not any(i and len(i) < 450 for i in self.history_simple_summaries[:-1]):
                 prompt = self.prompt_manager.get_summary_prompt(
                     '\n'.join([str(s) for s in self.history_simple_summaries[:10] if s is not None]))
                 self.anime_loader.stop_animation()
