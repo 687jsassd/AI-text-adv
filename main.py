@@ -125,6 +125,7 @@ def save_game(game_engine, save_name="autosave", is_manual_save=False):
             "situation_value": game_engine.situation,
             "token_consumes": game_engine.token_consumes,
             "extra_datas": extra_datas,
+            "item_repo": game_engine.item_repository,
         }
 
         # 生成文件名
@@ -239,6 +240,7 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
         game_engine.character_attributes = save_data["character_attributes"]
         game_engine.situation = save_data["situation_value"]
         game_engine.token_consumes = save_data["token_consumes"]
+        game_engine.item_repository=save_data["item_repo"]
 
         # 恢复配置
         config_data = save_data["custom_config"]
