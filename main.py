@@ -601,8 +601,8 @@ def operate_item(GAME: GameEngine):
         print("'*add 物品名 物品描述' 以添加物品")
         print("'*rename 物品id 新名称' 以重命名物品")
         print("'*redesc 物品id 新描述' 以改变物品描述")
-        print("'*putall' 将所有物品转移到仓库")
-        print("'*getall' 获得所有仓库中物品")
+        print("'**putall' 将所有物品转移到仓库")
+        print("'**getall' 获得所有仓库中物品")
         print("'*desc 物品名(或id)' 以查看该物品描述")
         print("'*showdesc' 以切换是否显示描述")
         print("exit. 退出物品操作")
@@ -664,11 +664,11 @@ def operate_item(GAME: GameEngine):
                 input(f"物品 {item_name} 已被重描述为 {new_desc}")
             else:
                 input(f"物品 {item_name} 不存在于你的库存中")
-        elif user_input == "*putall":
+        elif user_input == "**putall":
             GAME.item_repository.update(GAME.inventory)
             GAME.inventory.clear()
             input("所有物品已被存储")
-        elif user_input == "*getall":
+        elif user_input == "**getall":
             GAME.inventory.update(GAME.item_repository)
             GAME.item_repository.clear()
             input("所有物品已被获得")
