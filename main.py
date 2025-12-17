@@ -126,7 +126,6 @@ def save_game(game_engine, save_name="autosave", is_manual_save=False):
             "token_consumes": game_engine.token_consumes,
             "extra_datas": extra_datas,
             "item_repo": game_engine.item_repository,
-            "item_repo": game_engine.item_repository,
         }
 
         # 生成文件名
