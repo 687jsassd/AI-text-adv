@@ -967,8 +967,6 @@ def new_game(no_auto_load=False):
             print("可用指令：")
             print("exit: 退出游戏")
             print("inv: 查看道具")
-            print("add_item: 添加道具")
-            print("remove_item: 丢弃道具")
             print('summary:查看摘要')
             print('conclude_summary:手动总结当前摘要(不推荐)')
             print('save:保存游戏')
