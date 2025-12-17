@@ -87,6 +87,7 @@ def save_game(game_engine, save_name="autosave", is_manual_save=False):
         # 构建保存数据
         save_data = {
             "version": VERSION,
+            "save_desc": save_name,
             "game_id": game_engine.game_id,
             "timestamp": datetime.now().isoformat(),
             "player_name": game_engine.player_name,
@@ -329,15 +330,16 @@ def list_saves():
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         save_data = json.load(f)
-                    timestamp = datetime.fromisoformat(
-                        save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+                    # timestamp = datetime.fromisoformat(
+                    #    save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+                    save_desc = save_data["save_desc"]
                     save_info.append({
                         "game_id": game_id,
-                        "filename": filename,
-                        "timestamp": timestamp,
                         "player_name": save_data["player_name"],
                         "total_turns": save_data["total_turns"],
-                        "save_type": "manual" if filename.startswith("manual_") else "auto"
+                        "save_type": "manual" if filename.startswith("manual_") else "auto",
+                        "save_desc": save_desc,
+                        "ver": save_data["version"],
                     })
                 except:
                     continue
@@ -397,7 +399,7 @@ def manual_load(game_engine):
     for i, save in enumerate(saves, 1):
         save_type = "手动" if save['save_type'] == 'manual' else "自动"
         print(
-            f"{i}.{save['game_id']}-{save['player_name']}-回合{save['total_turns']}-类型: {save_type}")
+            f"{i}.{save['game_id']}{'-'+save['save_desc']if save['save_desc'] != 'autosave' else ''}-{save['player_name']}-回合{save['total_turns']}-{save_type}{'-'+COLOR_YELLOW+"不匹配的游戏版本"+save['ver']+COLOR_RESET if save['ver'] != VERSION else ''}")
 
     try:
         choice = input("选择要加载的存档编号（输入0取消）: ")
@@ -966,6 +968,7 @@ def new_game(no_auto_load=False):
             print("可用指令：")
             print("exit: 退出游戏")
             print("inv: 查看道具")
+            print('opi:进行道具操作')
             print('summary:查看摘要')
             print('conclude_summary:手动总结当前摘要(不推荐)')
             print('save:保存游戏')
