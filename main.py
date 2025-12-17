@@ -589,19 +589,19 @@ def operate_item(GAME: GameEngine):
         clear_screen()
         print(GAME.current_description)
         print("当前物品:" + GAME.get_inventory_text(show_desc))
-        print("仓库物品:" + GAME.get_item_repository_text(show_desc))
-        print("\n物品操作")
-        print("输入 '*use 被操作的物品名(或id) 进行什么操作 对哪个目标' 以操作物品(会推进剧情) 例如:'石子 投掷 梅超风'表示对梅超风投掷石子 ")
-        print("输入 '*remove 物品名(或id)' 以销毁物品")
-        print("输入 '*put 物品名(或id)' 以存储物品  (只有前25个物品会参与剧情，无用物品请进行存储)")
-        print("输入 '*get 物品名(或id)' 以从存储获得物品")
-        print("输入 '*add 物品名 物品描述' 以添加物品")
-        print("输入 '*rename 物品id 新名称' 以重命名物品")
-        print("输入 '*redesc 物品id 新描述' 以改变物品描述")
-        print("输入 '*putall' 将所有物品转移到仓库")
-        print("输入 '*getall' 获得所有仓库中物品")
-        print("输入 '*desc 物品名(或id)' 以查看该物品描述")
-        print("输入 '*showdesc' 以切换是否显示描述")
+        print("\n仓库物品:" + GAME.get_item_repository_text(show_desc))
+        print("\n物品操作指令")
+        print("输入 '*use 被操作的物品名(或id) 进行什么操作 对哪个目标' 以操作物品(会推进剧情) 例如:'*use 石子 投掷 梅超风'表示对梅超风投掷石子 ")
+        print("'*remove 物品名(或id)' 以销毁物品")
+        print("'*put 物品名(或id)' 以存储物品  (只有最后25个物品会参与剧情，无用物品请进行存储)")
+        print("'*get 物品名(或id)' 以从存储获得物品")
+        print("'*add 物品名 物品描述' 以添加物品")
+        print("'*rename 物品id 新名称' 以重命名物品")
+        print("'*redesc 物品id 新描述' 以改变物品描述")
+        print("'*putall' 将所有物品转移到仓库")
+        print("'*getall' 获得所有仓库中物品")
+        print("'*desc 物品名(或id)' 以查看该物品描述")
+        print("'*showdesc' 以切换是否显示描述")
         print("exit. 退出物品操作")
         user_input = input("输入操作:\n::")
         if user_input == "exit":
@@ -612,9 +612,9 @@ def operate_item(GAME: GameEngine):
                 item_name = list(GAME.inventory.keys())[int(item_name)-1]
             if item_name in GAME.inventory:
                 del GAME.inventory[item_name]
-                print(f"物品 {item_name} 已被销毁")
+                input(f"物品 {item_name} 已被销毁")
             else:
-                print(f"物品 {item_name} 不存在于你的库存中")
+                input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input.startswith("*put"):
             item_name = user_input.split("*put")[1].strip()
             if item_name.isdigit() and int(item_name) <= len(GAME.inventory):
@@ -622,9 +622,9 @@ def operate_item(GAME: GameEngine):
             if item_name in GAME.inventory:
                 GAME.item_repository[item_name] = GAME.inventory[item_name]
                 del GAME.inventory[item_name]
-                print(f"物品 {item_name} 已被存储")
+                input(f"物品 {item_name} 已被存储")
             else:
-                print(f"物品 {item_name} 不存在于你的库存中")
+                input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input.startswith("*get"):
             item_name = user_input.split("*get")[1].strip()
             if item_name.isdigit() and int(item_name) <= len(GAME.item_repository):
@@ -632,14 +632,14 @@ def operate_item(GAME: GameEngine):
             if item_name in GAME.item_repository:
                 GAME.inventory[item_name] = GAME.item_repository[item_name]
                 del GAME.item_repository[item_name]
-                print(f"物品 {item_name} 已被获得")
+                input(f"物品 {item_name} 已被获得")
             else:
-                print(f"物品 {item_name} 不存在于物品仓库中")
+                input(f"物品 {item_name} 不存在于物品仓库中")
         elif user_input.startswith("*add"):
             item_name, item_desc = user_input.split(
                 "*add")[1].strip().split(" ", 1)
             GAME.item_repository[item_name] = item_desc
-            print(f"物品 {item_name} 已被添加")
+            input(f"物品 {item_name} 已被添加")
         elif user_input.startswith("*rename"):
             item_id, new_name = user_input.split(
                 "*rename")[1].strip().split(" ", 1)
@@ -648,9 +648,9 @@ def operate_item(GAME: GameEngine):
             if item_name in GAME.inventory:
                 GAME.inventory[new_name] = GAME.inventory[item_name]
                 del GAME.inventory[item_name]
-                print(f"物品 {item_name} 已被重命名为 {new_name}")
+                input(f"物品 {item_name} 已被重命名为 {new_name}")
             else:
-                print(f"物品 {item_name} 不存在于你的库存中")
+                input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input.startswith("*redesc"):
             item_id, new_desc = user_input.split(
                 "*redesc")[1].strip().split(" ", 1)
@@ -658,17 +658,17 @@ def operate_item(GAME: GameEngine):
                 item_name = list(GAME.inventory.keys())[int(item_id)-1]
             if item_name in GAME.inventory:
                 GAME.inventory[item_name] = new_desc
-                print(f"物品 {item_name} 已被重描述为 {new_desc}")
+                input(f"物品 {item_name} 已被重描述为 {new_desc}")
             else:
-                print(f"物品 {item_name} 不存在于你的库存中")
+                input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input == "*putall":
             GAME.item_repository.update(GAME.inventory)
             GAME.inventory.clear()
-            print("所有物品已被存储")
+            input("所有物品已被存储")
         elif user_input == "*getall":
             GAME.inventory.update(GAME.item_repository)
             GAME.item_repository.clear()
-            print("所有物品已被获得")
+            input("所有物品已被获得")
         elif user_input.startswith("*use"):
             itemname, action, target = user_input.split(
                 "*use")[1].strip().split()
@@ -682,29 +682,28 @@ def operate_item(GAME: GameEngine):
                         f"对{target}使用背包里的物品{itemname}进行{action}操作", True)
                     return True
                 else:
-                    print("警告:操作不合理,仍要执行吗? (y/n)")
-                    user_confirm = input()
+                    user_confirm = input("警告:操作不合理,仍要执行吗? (y/n)")
                     if user_confirm.lower() == "y":
                         print("正在执行...")
                         GAME.go_game(
                             f"对{target}使用背包里的物品{itemname}进行{action}操作 (操作不合理!)", True)
                         return True
                     else:
-                        print("操作已取消")
+                        input("操作已取消")
             else:
-                print(f"物品 {itemname} 不存在于你的库存中")
+                input(f"物品 {itemname} 不存在于你的库存中")
         elif user_input.startswith("*desc"):
             item_name = user_input.split("*desc")[1].strip()
             if item_name.isdigit() and int(item_name) <= len(GAME.inventory):
                 item_name = list(GAME.inventory.keys())[int(item_name)-1]
             if item_name in GAME.inventory:
-                print(f"物品 {item_name} 的描述为: {GAME.inventory[item_name]}")
+                input(f"物品 {item_name} 的描述为: {GAME.inventory[item_name]}")
             else:
-                print(f"物品 {item_name} 不存在于你的库存中")
+                input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input == "*showdesc":
             show_desc = not show_desc
         else:
-            print("无效输入")
+            input("无效输入")
             continue
     return False
 
