@@ -116,7 +116,10 @@ class CustomConfig:
                 return default_models
         except Exception as e:
             print(f"加载模型配置文件时出错: {e}")
-            return {"models": {}}
+            return {"models": {"0": {
+                "name": "your-model-name",
+                "display_name": "desc"
+            }}}
 
     def _load_baseurls(self):
         """从JSON文件加载baseurl配置"""
@@ -138,7 +141,10 @@ class CustomConfig:
                 return default_baseurls
         except Exception as e:
             print(f"加载baseurl配置文件时出错: {e}")
-            return {"base_urls": {}}
+            return {"base_urls": {"0": {
+                "url": "your-base-url",
+                "display_name": "desc"
+            }}}
 
     def _load_apikeys(self):
         """从JSON文件加载API密钥配置"""
@@ -160,30 +166,45 @@ class CustomConfig:
                 return default_apikeys
         except Exception as e:
             print(f"加载API密钥配置文件时出错: {e}")
-            return {"api_keys": {}}
+            return {"api_keys": {"0": {
+                "key": "your-api-key",
+                "display_name": "desc"
+            }}}
 
     def _convert_models_to_dict(self):
         """将模型配置转换为字典格式"""
         models_dict = {}
-        for key, model_info in self.models_data.get("models", {}).items():
-            models_dict[int(key)] = (model_info["name"],
-                                     model_info["display_name"])
+        try:
+            for key, model_info in self.models_data.get("models", {}).items():
+                models_dict[int(key)] = (model_info["name"],
+                                         model_info["display_name"])
+        except Exception as e:
+            print(f"转换模型配置时出错: {e}")
+            return {}
         return models_dict
 
     def _convert_baseurls_to_dict(self):
         """将baseurl配置转换为字典格式"""
         baseurls_dict = {}
-        for key, baseurl_info in self.baseurls_data.get("base_urls", {}).items():
-            baseurls_dict[int(key)] = (baseurl_info["url"],
-                                       baseurl_info["display_name"])
+        try:
+            for key, baseurl_info in self.baseurls_data.get("base_urls", {}).items():
+                baseurls_dict[int(key)] = (baseurl_info["url"],
+                                           baseurl_info["display_name"])
+        except Exception as e:
+            print(f"转换baseurl配置时出错: {e}")
+            return {}
         return baseurls_dict
 
     def _convert_apikeys_to_dict(self):
         """将API密钥配置转换为字典格式"""
         apikeys_dict = {}
-        for key, apikey_info in self.apikeys_data.get("api_keys", {}).items():
-            apikeys_dict[int(key)] = (apikey_info["key"],
-                                      apikey_info["display_name"])
+        try:
+            for key, apikey_info in self.apikeys_data.get("api_keys", {}).items():
+                apikeys_dict[int(key)] = (apikey_info["key"],
+                                          apikey_info["display_name"])
+        except Exception as e:
+            print(f"转换API密钥配置时出错: {e}")
+            return {}
         return apikeys_dict
 
     def _load_config(self):

@@ -518,73 +518,80 @@ def print_all_history(GAME: GameEngine, back_range: int = 50):
 def config_game():
     is_exit = False
     while not is_exit:
-        clear_screen()
-        print("输入你想要配置的参数:")
-        print(f"1.最大输出Token [{config.max_tokens}]")
-        print(f"2.温度 [{config.temperature}]")
-        print(f"3.频率惩罚 [{config.frequency_penalty}]")
-        print(f"4.存在惩罚 [{config.presence_penalty}]")
-        print(f"5.玩家姓名 [{config.player_name}]")
-        print(f"6.玩家故事 [{config.player_story}]")
-        print(f"7.偏好:色情 [{config.frequency_reflect[config.porn_value]}]")
-        print(f"8.偏好:特别暴力 [{config.frequency_reflect[config.violence_value]}]")
-        print(f"9.偏好:血腥 [{config.frequency_reflect[config.blood_value]}]")
-        print(f"10.偏好:恐怖 [{config.frequency_reflect[config.horror_value]}]")
-        print(f"11.自定义附加提示词 [{config.custom_prompts}]")
-        print(f"12.模型 [{config.model_names[config.model_names_choice][1]}]")
-        print(f"13.API密钥 [{config.api_keys[config.api_keys_choice][1]}]")
-        print(f"14.基础URL [{config.base_urls[config.base_urls_choice][1]}]")
-        print("exit. 退出配置(完成配置)")
+        try:
+            clear_screen()
+            print("输入你想要配置的参数:")
+            print(f"1.最大输出Token [{config.max_tokens}]")
+            print(f"2.温度 [{config.temperature}]")
+            print(f"3.频率惩罚 [{config.frequency_penalty}]")
+            print(f"4.存在惩罚 [{config.presence_penalty}]")
+            print(f"5.玩家姓名 [{config.player_name}]")
+            print(f"6.玩家故事 [{config.player_story}]")
+            print(f"7.偏好:色情 [{config.frequency_reflect[config.porn_value]}]")
+            print(
+                f"8.偏好:特别暴力 [{config.frequency_reflect[config.violence_value]}]")
+            print(f"9.偏好:血腥 [{config.frequency_reflect[config.blood_value]}]")
+            print(
+                f"10.偏好:恐怖 [{config.frequency_reflect[config.horror_value]}]")
+            print(f"11.自定义附加提示词 [{config.custom_prompts}]")
+            print(
+                f"12.模型 [{config.model_names[config.model_names_choice][1]}]")
+            print(f"13.API密钥 [{config.api_keys[config.api_keys_choice][1]}]")
+            print(f"14.基础URL [{config.base_urls[config.base_urls_choice][1]}]")
+            print("exit. 退出配置(完成配置)")
 
-        while True:
-            choice = input("输入你想要配置的参数ID：")
-            if choice == "exit":
-                is_exit = True
-                config.save_to_file()
-                break
-            if choice.isdigit() and 1 <= int(choice) <= 14:
-                choice = int(choice)
-                if choice == 1:
-                    config.max_tokens = int(input("输入最大输出Token数："))
-                elif choice == 2:
-                    config.temperature = float(input("输入温度："))
-                elif choice == 3:
-                    config.frequency_penalty = float(input("输入频率惩罚："))
-                elif choice == 4:
-                    config.presence_penalty = float(input("输入存在惩罚："))
-                elif choice == 5:
-                    config.player_name = input("输入玩家姓名：")
-                elif choice == 6:
-                    config.player_story = input("输入玩家故事：")
-                elif choice == 7:
-                    config.porn_value = int(input("输入色情偏好（0-5）："))
-                elif choice == 8:
-                    config.violence_value = int(input("输入特别暴力偏好（0-5）："))
-                elif choice == 9:
-                    config.blood_value = int(input("输入血腥偏好（0-5）："))
-                elif choice == 10:
-                    config.horror_value = int(input("输入恐怖偏好（0-5）："))
-                elif choice == 11:
-                    config.custom_prompts = input("输入自定义附加提示词：")
-                elif choice == 12:
-                    print("可用模型:")
-                    for key, val in config.model_names.items():
-                        print(f"{key}. {val[1]}")
-                    config.model_names_choice = int(input("输入模型ID："))
-                elif choice == 13:
-                    print("可用API密钥:")
-                    for key, val in config.api_keys.items():
-                        print(f"{key}. {val[1]}")
-                    config.api_keys_choice = int(input("输入API密钥ID："))
-                elif choice == 14:
-                    print("可用基础URL:")
-                    for key, val in config.base_urls.items():
-                        print(f"{key}. {val[1]}")
-                    config.base_urls_choice = int(input("输入基础URL ID："))
-                break
-            else:
-                print("无效的选项ID，请重新输入。")
-                continue
+            while True:
+                choice = input("输入你想要配置的参数ID：")
+                if choice == "exit":
+                    is_exit = True
+                    config.save_to_file()
+                    break
+                if choice.isdigit() and 1 <= int(choice) <= 14:
+                    choice = int(choice)
+                    if choice == 1:
+                        config.max_tokens = int(input("输入最大输出Token数："))
+                    elif choice == 2:
+                        config.temperature = float(input("输入温度："))
+                    elif choice == 3:
+                        config.frequency_penalty = float(input("输入频率惩罚："))
+                    elif choice == 4:
+                        config.presence_penalty = float(input("输入存在惩罚："))
+                    elif choice == 5:
+                        config.player_name = input("输入玩家姓名：")
+                    elif choice == 6:
+                        config.player_story = input("输入玩家故事：")
+                    elif choice == 7:
+                        config.porn_value = int(input("输入色情偏好（0-5）："))
+                    elif choice == 8:
+                        config.violence_value = int(input("输入特别暴力偏好（0-5）："))
+                    elif choice == 9:
+                        config.blood_value = int(input("输入血腥偏好（0-5）："))
+                    elif choice == 10:
+                        config.horror_value = int(input("输入恐怖偏好（0-5）："))
+                    elif choice == 11:
+                        config.custom_prompts = input("输入自定义附加提示词：")
+                    elif choice == 12:
+                        print("可用模型:")
+                        for key, val in config.model_names.items():
+                            print(f"{key}. {val[1]}")
+                        config.model_names_choice = int(input("输入模型ID："))
+                    elif choice == 13:
+                        print("可用API密钥:")
+                        for key, val in config.api_keys.items():
+                            print(f"{key}. {val[1]}")
+                        config.api_keys_choice = int(input("输入API密钥ID："))
+                    elif choice == 14:
+                        print("可用基础URL:")
+                        for key, val in config.base_urls.items():
+                            print(f"{key}. {val[1]}")
+                        config.base_urls_choice = int(input("输入基础URL ID："))
+                    break
+                else:
+                    print("无效的选项ID，请重新输入。")
+                    continue
+        except ValueError:
+            input("输入无效")
+            continue
 
 
 def operate_item(GAME: GameEngine):
