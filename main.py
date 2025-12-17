@@ -335,6 +335,7 @@ def list_saves():
                     save_desc = save_data.get("save_desc", "autosave")
                     save_info.append({
                         "game_id": game_id,
+                        "filename": filename,
                         "player_name": save_data["player_name"],
                         "timestamp": timestamp,
                         "total_turns": save_data["total_turns"],
