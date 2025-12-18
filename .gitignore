@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
+
+# 环境相关文件
 env/
 venv/
 ENV/
@@ -27,8 +29,6 @@ apikeys.json
 
 # 一些不必要md文件
 CODEBUDDY.md
-
-
 
 # 系统文件
 .DS_Store
