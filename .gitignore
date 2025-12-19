@@ -21,11 +21,12 @@ venv.bak/
 # 项目特定的忽略文件
 logs/
 saves/
-config.json
-models.json
-baseurls.json
-apikeys.json
 开局.txt
+
+# 配置文件（保留示例文件）
+config/config.json
+config/llm_api_config.json
+!config/llm_api_config.example.json
 
 # 一些不必要md文件
 CODEBUDDY.md

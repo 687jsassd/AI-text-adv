@@ -93,37 +93,44 @@ cd AI-game-test
 pip install openai json_repair
 ```
 
-3. **配置API密钥**
-编辑 `apikeys.json` 文件，添加您的API密钥：
+3. **配置API**
+复制 `config/llm_api_config.example.json` 为 `config/llm_api_config.json`，然后填入您的API配置：
 ```json
 {
-  "api_keys": {
-    "0": { "key": "your-api-key-here", "display_name": "提供商名称" }
-  }
+  "api_providers": {
+    "0": {
+      "name": "硅基流动",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "your-api-key-here",
+      "model": "deepseek-ai/DeepSeek-V3"
+    }
+  },
+  "api_provider_choice": 0
 }
 ```
 
-4. **配置模型和端点**
-编辑 `models.json` 和 `baseurls.json` 文件，配置您要使用的模型和API端点。
-
-5. **运行游戏**
+4. **运行游戏**
 ```bash
 python main.py
 ```
 
 ## ⚙️ 配置说明
 
-### 主要配置文件
+### 配置文件
 
-- **config.json**: 核心游戏设置
-  - AI参数（max_tokens, temperature等）
-  - 玩家偏好设置（色情、暴力、血腥、恐怖程度；如需自定义词库或添加提示词，可修改prompt_manager.py中的相关代码，也可写在自定义附加提示词中）
-  - 玩家信息（姓名、背景故事）
-  - 自定义附加提示词 (将影响：各轮AI生成内容、AI对自定义行动的修饰等）
+所有配置文件位于 `config/` 目录下：
 
-- **models.json**: AI模型配置
-- **baseurls.json**: API端点配置
-- **apikeys.json**: 认证密钥配置
+- **config/config.json**: 游戏设置
+  - **ai_settings**: AI参数（max_tokens, temperature等）
+  - **preferences**: 玩家偏好设置（色情、暴力、血腥、恐怖程度）
+  - **player_settings**: 玩家信息（姓名、背景故事）
+  - **custom_prompts**: 自定义附加提示词
+
+- **config/llm_api_config.json**: LLM API 提供商配置
+  - **api_providers**: 提供商列表（便于进行密钥、端点、模型统一管理）
+  - **api_provider_choice**: 当前使用的提供商ID，可以手动指定使用哪个 LLM
+
+- **config/llm_api_config.example.json**: API配置示例（逐步新增 LLM 提供商）
 
 ### 游戏设置
 
@@ -187,11 +194,10 @@ AI-game-test/
 ├── config.py            # 配置管理系统
 ├── prompt_manager.py    # 提示词管理
 ├── animes.py            # 动画效果工具
-├── config.json          # 游戏设置
-├── models.json          # AI模型配置
-├── baseurls.json        # API端点配置
-├── apikeys.json         # API密钥配置
-├── 开局.txt             # 示例游戏剧本
+├── config/              # 配置文件目录
+│   ├── config.json              # 游戏设置
+│   ├── llm_api_config.json      # API提供商配置
+│   └── llm_api_config.example.json  # API配置示例
 ├── saves/               # 存档目录
 ├── logs/                # 游戏日志
 └── __pycache__/         # Python缓存
@@ -262,8 +268,7 @@ AI-game-test/
 ### 常见问题
 
 1. **API连接失败**
-   - 检查 `apikeys.json` 中的密钥是否正确
-   - 验证 `baseurls.json` 中的端点是否可访问
+   - 检查 `config/llm_api_config.json` 中的密钥、端点、模型是否正确
 
 2. **JSON解析错误**
    - AI响应格式不符合要求

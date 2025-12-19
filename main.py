@@ -118,9 +118,7 @@ def save_game(game_engine, save_name="autosave", is_manual_save=False):
                 "blood_value": game_engine.custom_config.blood_value,
                 "horror_value": game_engine.custom_config.horror_value,
                 "custom_prompts": game_engine.custom_config.custom_prompts,
-                "base_urls_choice": game_engine.custom_config.base_urls_choice,
-                "model_names_choice": game_engine.custom_config.model_names_choice,
-                "api_keys_choice": game_engine.custom_config.api_keys_choice,
+                "api_provider_choice": game_engine.custom_config.api_provider_choice,
             },
             "character_attributes": game_engine.character_attributes,
             "situation_value": game_engine.situation,
@@ -259,9 +257,8 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
         game_engine.custom_config.blood_value = config_data["blood_value"]
         game_engine.custom_config.horror_value = config_data["horror_value"]
         game_engine.custom_config.custom_prompts = config_data["custom_prompts"]
-        game_engine.custom_config.base_urls_choice = config_data["base_urls_choice"]
-        game_engine.custom_config.model_names_choice = config_data["model_names_choice"]
-        game_engine.custom_config.api_keys_choice = config_data["api_keys_choice"]
+        if "api_provider_choice" in config_data:
+            game_engine.custom_config.api_provider_choice = config_data["api_provider_choice"]
 
         timestamp = datetime.fromisoformat(
             save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
@@ -543,10 +540,10 @@ def config_game():
             print(
                 f"10.偏好:恐怖 [{config.frequency_reflect[config.horror_value]}]")
             print(f"11.自定义附加提示词 [{config.custom_prompts}]")
-            print(
-                f"12.模型 [{config.model_names[config.model_names_choice][1]}]")
-            print(f"13.API密钥 [{config.api_keys[config.api_keys_choice][1]}]")
-            print(f"14.基础URL [{config.base_urls[config.base_urls_choice][1]}]")
+            current_provider = config.get_current_provider()
+            print(f"12.API提供商 [{current_provider.get('name', '未配置')}]")
+            print(f"   - 模型: {current_provider.get('model', '')}")
+            print(f"   - api地址: {current_provider.get('base_url', '')}")
             print("exit. 退出配置(完成配置)")
 
             while True:
@@ -555,7 +552,7 @@ def config_game():
                     is_exit = True
                     config.save_to_file()
                     break
-                if choice.isdigit() and 1 <= int(choice) <= 14:
+                if choice.isdigit() and 1 <= int(choice) <= 12:
                     choice = int(choice)
                     if choice == 1:
                         config.max_tokens = int(input("输入最大输出Token数："))
@@ -580,20 +577,11 @@ def config_game():
                     elif choice == 11:
                         config.custom_prompts = input("输入自定义附加提示词：")
                     elif choice == 12:
-                        print("可用模型:")
-                        for key, val in config.model_names.items():
-                            print(f"{key}. {val[1]}")
-                        config.model_names_choice = int(input("输入模型ID："))
-                    elif choice == 13:
-                        print("可用API密钥:")
-                        for key, val in config.api_keys.items():
-                            print(f"{key}. {val[1]}")
-                        config.api_keys_choice = int(input("输入API密钥ID："))
-                    elif choice == 14:
-                        print("可用基础URL:")
-                        for key, val in config.base_urls.items():
-                            print(f"{key}. {val[1]}")
-                        config.base_urls_choice = int(input("输入基础URL ID："))
+                        print("可用API提供商:")
+                        for key, provider in config.api_providers.items():
+                            print(f"{key}. {provider['name']} (模型: {provider['model']})")
+                        config.api_provider_choice = int(input("输入提供商ID："))
+                        config._sync_legacy_choices()
                     break
                 else:
                     print("无效的选项ID，请重新输入。")
