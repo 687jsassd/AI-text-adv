@@ -1,0 +1,17 @@
+{
+  "api_providers": {
+    "0": {
+      "name": "硅基流动(已完成测试)",
+      "base_url": "https://api.siliconflow.cn/v1",
+      "api_key": "your-api-key-here",
+      "model": "deepseek-ai/DeepSeek-V3"
+    },
+    "1": {
+      "name": "example",
+      "base_url": "https://xxx",
+      "api_key": "your-api-key-here",
+      "model": "xxx"
+    }
+  },
+  "api_provider_choice": 0
+}

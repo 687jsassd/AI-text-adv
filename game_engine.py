@@ -93,10 +93,11 @@ class GameEngine:
         temperature = self.custom_config.temperature
         frequency_penalty = self.custom_config.frequency_penalty
         presence_penalty = self.custom_config.presence_penalty
-        # 从配置中获取选择的模型和API密钥
-        model_name = self.custom_config.model_names[self.custom_config.model_names_choice][0]
-        api_key = self.custom_config.api_keys[self.custom_config.api_keys_choice][0]
-        base_url = self.custom_config.base_urls[self.custom_config.base_urls_choice][0]
+        
+        provider = self.custom_config.get_current_provider()
+        model_name = provider["model"]
+        api_key = provider["api_key"]
+        base_url = provider["base_url"]
 
         try:
             client = openai.OpenAI(

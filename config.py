@@ -21,10 +21,10 @@ COLOR_CYAN = "\033[96m"
 COLOR_RESET = "\033[0m"
 
 # 配置文件路径
-CONFIG_FILE = "config.json"
-MODELS_FILE = "models.json"
-BASEURLS_FILE = "baseurls.json"
-APIKEYS_FILE = "apikeys.json"
+CONFIG_DIR = "config"
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+LLM_API_CONFIG_FILE = os.path.join(CONFIG_DIR, "llm_api_config.json")
+os.makedirs(CONFIG_DIR, exist_ok=True)
 
 
 class CustomConfig:
@@ -48,11 +48,6 @@ class CustomConfig:
     def __init__(self):
         # 从JSON文件加载配置
         self.config_data = self._load_config()
-
-        # 加载模型、baseurl和API配置
-        self.models_data = self._load_models()
-        self.baseurls_data = self._load_baseurls()
-        self.apikeys_data = self._load_apikeys()
 
         # AI调用相关
         self.max_tokens = self.config_data.get(
@@ -83,129 +78,56 @@ class CustomConfig:
         self.player_story = self.config_data.get(
             "player_settings", {}).get("player_story", "")
 
-        # 模型选择相关 - 从配置文件加载
-        self.model_names = self._convert_models_to_dict()
-        self.model_names_choice = self.config_data.get(
-            "model_settings", {}).get("model_names_choice", 0)
+        # LLM API 配置：参考config目录下面的配置即可
+        self.llm_api_config = self._load_llm_api_config()
+        self.api_providers = self._convert_api_providers_to_dict()
+        self.api_provider_choice = self.llm_api_config.get("api_provider_choice", 0)
 
-        self.base_urls = self._convert_baseurls_to_dict()
-        self.base_urls_choice = self.config_data.get(
-            "model_settings", {}).get("base_urls_choice", 0)
-
-        self.api_keys = self._convert_apikeys_to_dict()
-        self.api_keys_choice = self.config_data.get(
-            "model_settings", {}).get("api_keys_choice", 0)
-
-    def _load_models(self):
-        """从JSON文件加载模型配置"""
+    def _load_llm_api_config(self):
         try:
-            if os.path.exists(MODELS_FILE):
-                with open(MODELS_FILE, 'r', encoding='utf-8') as f:
+            if os.path.exists(LLM_API_CONFIG_FILE):
+                with open(LLM_API_CONFIG_FILE, 'r', encoding='utf-8') as f:
                     return json.load(f)
             else:
-                # 如果配置文件不存在，创建默认配置
-                default_models = {
-                    "models": {
+                default_config = {
+                    "api_providers": {
                         "0": {
-                            "name": "your-model-name",
-                            "display_name": "desc"
+                            "name": "默认提供商",
+                            "base_url": "your-base-url",
+                            "api_key": "your-api-key",
+                            "model": "your-model-name"
                         }
-                    }
+                    },
+                    "api_provider_choice": 0
                 }
-                self._save_json_file(MODELS_FILE, default_models)
-                return default_models
+                self._save_json_file(LLM_API_CONFIG_FILE, default_config)
+                return default_config
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"加载模型配置文件时出错: {e}")
-            return {"models": {"0": {
-                "name": "your-model-name",
-                "display_name": "desc"
-            }}}
+            print(f"加载LLM API配置文件时出错: {e}")
+            return {"api_providers": {}, "api_provider_choice": 0}
 
-    def _load_baseurls(self):
-        """从JSON文件加载baseurl配置"""
+    def _convert_api_providers_to_dict(self):
+        providers_dict = {}
         try:
-            if os.path.exists(BASEURLS_FILE):
-                with open(BASEURLS_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            else:
-                # 如果配置文件不存在，创建默认配置
-                default_baseurls = {
-                    "base_urls": {
-                        "0": {
-                            "url": "your-base-url",
-                            "display_name": "desc"
-                        },
-                    }
+            for key, provider_info in self.llm_api_config.get("api_providers", {}).items():
+                providers_dict[int(key)] = {
+                    "name": provider_info.get("name", "未命名"),
+                    "base_url": provider_info.get("base_url", ""),
+                    "api_key": provider_info.get("api_key", ""),
+                    "model": provider_info.get("model", "")
                 }
-                self._save_json_file(BASEURLS_FILE, default_baseurls)
-                return default_baseurls
         except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"加载baseurl配置文件时出错: {e}")
-            return {"base_urls": {"0": {
-                "url": "your-base-url",
-                "display_name": "desc"
-            }}}
+            print(f"转换API提供商配置时出错: {e}")
+            return {0: {
+                "name": "默认",
+                "base_url": "your-base-url",
+                "api_key": "your-api-key",
+                "model": "your-model-name"
+            }}
+        return providers_dict
 
-    def _load_apikeys(self):
-        """从JSON文件加载API密钥配置"""
-        try:
-            if os.path.exists(APIKEYS_FILE):
-                with open(APIKEYS_FILE, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            else:
-                # 如果配置文件不存在，创建默认配置
-                default_apikeys = {
-                    "api_keys": {
-                        "0": {
-                            "key": "your-api-key",
-                            "display_name": "desc"
-                        },
-                    }
-                }
-                self._save_json_file(APIKEYS_FILE, default_apikeys)
-                return default_apikeys
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"加载API密钥配置文件时出错: {e}")
-            return {"api_keys": {"0": {
-                "key": "your-api-key",
-                "display_name": "desc"
-            }}}
-
-    def _convert_models_to_dict(self):
-        """将模型配置转换为字典格式"""
-        models_dict = {}
-        try:
-            for key, model_info in self.models_data.get("models", {}).items():
-                models_dict[int(key)] = (model_info["name"],
-                                         model_info["display_name"])
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"转换模型配置时出错: {e}")
-            return {}
-        return models_dict
-
-    def _convert_baseurls_to_dict(self):
-        """将baseurl配置转换为字典格式"""
-        baseurls_dict = {}
-        try:
-            for key, baseurl_info in self.baseurls_data.get("base_urls", {}).items():
-                baseurls_dict[int(key)] = (baseurl_info["url"],
-                                           baseurl_info["display_name"])
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"转换baseurl配置时出错: {e}")
-            return {}
-        return baseurls_dict
-
-    def _convert_apikeys_to_dict(self):
-        """将API密钥配置转换为字典格式"""
-        apikeys_dict = {}
-        try:
-            for key, apikey_info in self.apikeys_data.get("api_keys", {}).items():
-                apikeys_dict[int(key)] = (apikey_info["key"],
-                                          apikey_info["display_name"])
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"转换API密钥配置时出错: {e}")
-            return {}
-        return apikeys_dict
+    def get_current_provider(self):
+        return self.api_providers.get(self.api_provider_choice, {})
 
     def _load_config(self):
         """从JSON文件加载配置"""
@@ -231,11 +153,6 @@ class CustomConfig:
                     "player_settings": {
                         "player_name": "玩家",
                         "player_story": ""
-                    },
-                    "model_settings": {
-                        "base_urls_choice": 0,
-                        "model_names_choice": 0,
-                        "api_keys_choice": 0
                     },
                     "custom_prompts": ""
                 }
@@ -272,14 +189,18 @@ class CustomConfig:
                 "player_name": self.player_name,
                 "player_story": self.player_story
             },
-            "model_settings": {
-                "base_urls_choice": self.base_urls_choice,
-                "model_names_choice": self.model_names_choice,
-                "api_keys_choice": self.api_keys_choice
-            },
             "custom_prompts": self.custom_prompts
         }
         self._save_json_file(CONFIG_FILE, config_data)
+
+        api_providers_json = {}
+        for key, provider in self.api_providers.items():
+            api_providers_json[str(key)] = provider
+        llm_api_config = {
+            "api_providers": api_providers_json,
+            "api_provider_choice": self.api_provider_choice
+        }
+        self._save_json_file(LLM_API_CONFIG_FILE, llm_api_config)
 
     def get_preference_prompt(self):
         """获取偏好提示词(根据偏好的四个属性和对应的程度映射组成句子)"""
