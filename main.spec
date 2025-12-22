@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['D:\\Code\\projects\\Experience\\AI-game-test\\main.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('D:\\Code\\projects\\Experience\\AI-game-test\\config', 'config/'), ('D:\\Code\\projects\\Experience\\AI-game-test\\logs', 'logs/'), ('D:\\Code\\projects\\Experience\\AI-game-test\\saves', 'saves/')],
+    datas=[('.\\config', 'config/'), ('.\\logs', 'logs/'), ('.\\saves', 'saves/')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['D:\\Code\\projects\\Experience\\AI-game-test\\icon.ico'],
+    icon=['icon.ico'],
 )
 coll = COLLECT(
     exe,

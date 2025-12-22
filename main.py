@@ -11,7 +11,7 @@ from animes import typewriter_narrative, show_loading_animation, SyncLoadingAnim
 
 config = CustomConfig()
 
-VERSION = "0.1.6"
+VERSION = "0.1.6b"
 
 extra_datas = {
     "turn": 0,
@@ -446,16 +446,16 @@ def display_narrative(narr: str):
     return display_narrative_with_typewriter(narr)
 
 
-def display_options(GAME: GameEngine):
+def display_options(game: GameEngine):
     """
     显示游戏选项
     """
-    if GAME.prompt_manager.is_no_options:
+    if game.prompt_manager.is_no_options:
         print("输入help 查看帮助")
         print('-'*30)
         return
     has_danger, has_event, has_goods = False, False, False
-    options, chara_attrs, situation = GAME.current_options, GAME.character_attributes, GAME.situation
+    options, chara_attrs, situation = game.current_options, game.character_attributes, game.situation
     print("\n" + "你准备：")
     for opt in options:
         print(f"{opt['id']}. {opt['text']}", end="")
@@ -500,7 +500,7 @@ def display_options(GAME: GameEngine):
     print('-'*30)
 
 
-def get_user_input_and_go(GAME: GameEngine):
+def get_user_input_and_go(game: GameEngine):
     """
     获取用户输入并执行游戏操作
     """
@@ -510,28 +510,28 @@ def get_user_input_and_go(GAME: GameEngine):
         user_input = input(":: ")
         if user_input in ['exit', 'vars', 'setvar', 'delvar', 'csmode', 'opi', 'think', 'inv', 'attr', 'conclude_summary', 'help', 'summary', 'save', 'load', 'new', 'config', 'show_init_resp', 'fix_item_name', 'ana_token']:
             return user_input
-        if user_input.isdigit() and 1 <= int(user_input) <= len(GAME.current_options):
+        if user_input.isdigit() and 1 <= int(user_input) <= len(game.current_options):
             display_narrative(
-                GAME.current_options[int(user_input)-1]['next_preview'])
-        if user_input == "custom" or GAME.prompt_manager.is_no_options:
+                game.current_options[int(user_input)-1]['next_preview'])
+        if user_input == "custom" or game.prompt_manager.is_no_options:
             custom_action = input("你决定 (输入空内容以取消,输入0以使用刚刚输入的内容作为行动)：")
             if custom_action == "0":
                 custom_action = user_input
-            if custom_action.strip() == "" or GAME.go_game(custom_action, is_custom=True) == -1:
+            if custom_action.strip() == "" or game.go_game(custom_action, is_custom=True) == -1:
                 print("自定义行动无效")
                 continue
             return custom_action
-        if not user_input.isdigit() or GAME.go_game(user_input) == -1:
+        if not user_input.isdigit() or game.go_game(user_input) == -1:
             print("无效的选项ID，请重新输入。")
             continue
         return user_input
 
 
-def print_all_history(GAME: GameEngine, back_range: int = 50):
+def print_all_history(game: GameEngine, back_range: int = 50):
     """
     打印游戏历史记录
     """
-    for turn, desc, choice in zip(range(1, len(GAME.history_descriptions[-back_range:])+1), GAME.history_descriptions[-back_range:], GAME.history_choices[-back_range:]):
+    for turn, desc, choice in zip(range(1, len(game.history_descriptions[-back_range:])+1), game.history_descriptions[-back_range:], game.history_choices[-back_range:]):
         print(f"{turn}:")
         print(desc)
         print(choice)
@@ -612,16 +612,16 @@ def config_game():
             continue
 
 
-def operate_item(GAME: GameEngine):
+def operate_item(game: GameEngine):
     """
     操作物品
     """
     show_desc = True
     while True:
         clear_screen()
-        print(GAME.current_description)
-        print("当前物品:" + GAME.get_inventory_text(show_desc))
-        print("\n仓库物品:" + GAME.get_item_repository_text(show_desc))
+        print(game.current_description)
+        print("当前物品:" + game.get_inventory_text(show_desc))
+        print("\n仓库物品:" + game.get_item_repository_text(show_desc))
         print("\n物品操作指令")
         print("输入 '*use 被操作的物品名(或id) 进行什么操作 对哪个目标' 以操作物品(会推进剧情) 例如:'*use 石子 投掷 梅超风'表示对梅超风投掷石子 ")
         print("'*remove 物品名(或id)' 以销毁物品;输入多个空格分隔的id以批量操作")
@@ -641,87 +641,87 @@ def operate_item(GAME: GameEngine):
         elif user_input.startswith("*remove"):
             item_names = user_input.split("*remove")[1].strip().split(" ")
             for item_name in item_names:
-                if item_name.isdigit() and int(item_name) <= len(GAME.inventory):
-                    item_name = list(GAME.inventory.keys())[int(item_name)-1]
-                if item_name in GAME.inventory:
-                    del GAME.inventory[item_name]
+                if item_name.isdigit() and int(item_name) <= len(game.inventory):
+                    item_name = list(game.inventory.keys())[int(item_name)-1]
+                if item_name in game.inventory:
+                    del game.inventory[item_name]
                     input(f"物品 {item_name} 已被销毁")
                 else:
                     input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input.startswith("*put"):
             item_names = user_input.split("*put")[1].strip().split(" ")
             for item_name in item_names:
-                if item_name.isdigit() and int(item_name) <= len(GAME.inventory):
-                    item_name = list(GAME.inventory.keys())[int(item_name)-1]
-                if item_name in GAME.inventory:
-                    GAME.item_repository[item_name] = GAME.inventory[item_name]
-                    del GAME.inventory[item_name]
+                if item_name.isdigit() and int(item_name) <= len(game.inventory):
+                    item_name = list(game.inventory.keys())[int(item_name)-1]
+                if item_name in game.inventory:
+                    game.item_repository[item_name] = game.inventory[item_name]
+                    del game.inventory[item_name]
                     input(f"物品 {item_name} 已被存储")
                 else:
                     input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input.startswith("*get"):
             item_names = user_input.split("*get")[1].strip().split(" ")
             for item_name in item_names:
-                if item_name.isdigit() and int(item_name) <= len(GAME.item_repository):
-                    item_name = list(GAME.item_repository.keys())[
+                if item_name.isdigit() and int(item_name) <= len(game.item_repository):
+                    item_name = list(game.item_repository.keys())[
                         int(item_name)-1]
-                if item_name in GAME.item_repository:
-                    GAME.inventory[item_name] = GAME.item_repository[item_name]
-                    del GAME.item_repository[item_name]
+                if item_name in game.item_repository:
+                    game.inventory[item_name] = game.item_repository[item_name]
+                    del game.item_repository[item_name]
                     input(f"物品 {item_name} 已被获得")
                 else:
                     input(f"物品 {item_name} 不存在于物品仓库中")
         elif user_input.startswith("*add"):
             item_name, item_desc = user_input.split(
                 "*add")[1].strip().split(" ", 1)
-            GAME.item_repository[item_name] = item_desc
+            game.item_repository[item_name] = item_desc
             input(f"物品 {item_name} 已被添加")
         elif user_input.startswith("*rename"):
             item_id, new_name = user_input.split(
                 "*rename")[1].strip().split(" ", 1)
-            if item_id.isdigit() and int(item_id) <= len(GAME.inventory):
-                item_name = list(GAME.inventory.keys())[int(item_id)-1]
-            if item_name in GAME.inventory:
-                GAME.inventory[new_name] = GAME.inventory[item_name]
-                del GAME.inventory[item_name]
+            if item_id.isdigit() and int(item_id) <= len(game.inventory):
+                item_name = list(game.inventory.keys())[int(item_id)-1]
+            if item_name in game.inventory:
+                game.inventory[new_name] = game.inventory[item_name]
+                del game.inventory[item_name]
                 input(f"物品 {item_name} 已被重命名为 {new_name}")
             else:
                 input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input.startswith("*redesc"):
             item_id, new_desc = user_input.split(
                 "*redesc")[1].strip().split(" ", 1)
-            if item_id.isdigit() and int(item_id) <= len(GAME.inventory):
-                item_name = list(GAME.inventory.keys())[int(item_id)-1]
-            if item_name in GAME.inventory:
-                GAME.inventory[item_name] = new_desc
+            if item_id.isdigit() and int(item_id) <= len(game.inventory):
+                item_name = list(game.inventory.keys())[int(item_id)-1]
+            if item_name in game.inventory:
+                game.inventory[item_name] = new_desc
                 input(f"物品 {item_name} 已被重描述为 {new_desc}")
             else:
                 input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input == "**putall":
-            GAME.item_repository.update(GAME.inventory)
-            GAME.inventory.clear()
+            game.item_repository.update(game.inventory)
+            game.inventory.clear()
             input("所有物品已被存储")
         elif user_input == "**getall":
-            GAME.inventory.update(GAME.item_repository)
-            GAME.item_repository.clear()
+            game.inventory.update(game.item_repository)
+            game.item_repository.clear()
             input("所有物品已被获得")
         elif user_input.startswith("*use"):
             itemname, action, target = user_input.split(
                 "*use")[1].strip().split()
-            if itemname.isdigit() and int(itemname) <= len(GAME.inventory):
-                itemname = list(GAME.inventory.keys())[int(itemname)-1]
-            if itemname in GAME.inventory:
+            if itemname.isdigit() and int(itemname) <= len(game.inventory):
+                itemname = list(game.inventory.keys())[int(itemname)-1]
+            if itemname in game.inventory:
                 print("等待合理性判定...")
-                if GAME.is_use_item_ok(itemname, action, target):
+                if game.is_use_item_ok(itemname, action, target):
                     print("操作合理，正在执行...")
-                    GAME.go_game(
+                    game.go_game(
                         f"对{target}使用背包里的物品{itemname}进行{action}操作", True)
                     return True
                 else:
                     user_confirm = input("警告:操作不合理,仍要执行吗? (y/n)")
                     if user_confirm.lower() == "y":
                         print("正在执行...")
-                        GAME.go_game(
+                        game.go_game(
                             f"对{target}使用背包里的物品{itemname}进行{action}操作 (操作不合理!)", True)
                         return True
                     else:
@@ -730,10 +730,10 @@ def operate_item(GAME: GameEngine):
                 input(f"物品 {itemname} 不存在于你的库存中")
         elif user_input.startswith("*desc"):
             item_name = user_input.split("*desc")[1].strip()
-            if item_name.isdigit() and int(item_name) <= len(GAME.inventory):
-                item_name = list(GAME.inventory.keys())[int(item_name)-1]
-            if item_name in GAME.inventory:
-                input(f"物品 {item_name} 的描述为: {GAME.inventory[item_name]}")
+            if item_name.isdigit() and int(item_name) <= len(game.inventory):
+                item_name = list(game.inventory.keys())[int(item_name)-1]
+            if item_name in game.inventory:
+                input(f"物品 {item_name} 的描述为: {game.inventory[item_name]}")
             else:
                 input(f"物品 {item_name} 不存在于你的库存中")
         elif user_input == "*showdesc":
@@ -744,12 +744,12 @@ def operate_item(GAME: GameEngine):
     return False
 
 
-def analyze_token_consume(GAME: GameEngine):
+def analyze_token_consume(game: GameEngine):
     """
     分析游戏过程中token消耗趋势
     """
     # 获取总轮数
-    total_rounds = len(GAME.token_consumes)
+    total_rounds = len(game.token_consumes)
 
     # 存储结果
     results = []
@@ -757,12 +757,12 @@ def analyze_token_consume(GAME: GameEngine):
     # 从10轮开始，每10轮作为一个区间，直到总轮数
     for interval_end in range(10, total_rounds + 1, 10):
         # 计算当前区间(1到interval_end轮)的平均token消耗
-        rounds_data = GAME.token_consumes[:interval_end]
+        rounds_data = game.token_consumes[:interval_end]
         avg_consume = sum(rounds_data) / interval_end
 
         # 为简单线性回归准备数据
         x_vals = list(range(1, interval_end + 1))
-        y_vals = GAME.token_consumes[:interval_end]
+        y_vals = game.token_consumes[:interval_end]
 
         # 简单线性回归（最小二乘法）
         n = interval_end
@@ -790,11 +790,11 @@ def analyze_token_consume(GAME: GameEngine):
 
     # 如果总轮数不是10的倍数，添加最后一个区间
     if total_rounds % 10 != 0:
-        rounds_data = GAME.token_consumes[:total_rounds]
+        rounds_data = game.token_consumes[:total_rounds]
         avg_consume = sum(rounds_data) / total_rounds
 
         x_vals = list(range(1, total_rounds + 1))
-        y_vals = GAME.token_consumes[:total_rounds]
+        y_vals = game.token_consumes[:total_rounds]
 
         n = total_rounds
         sum_x = sum(x_vals)
@@ -832,17 +832,20 @@ def analyze_token_consume(GAME: GameEngine):
     input('按任意键继续')
 
 
-def show_item_var_caution(GAME: GameEngine):
+def show_item_var_caution(game: GameEngine):
     """如果物品数/变量数超过35.分别提醒用户注意token消耗和适用性"""
-    if len(GAME.inventory) > 35:
+    if len(game.inventory) > 35:
         print(COLOR_YELLOW +
-              f"*物品数超过35个({len(GAME.inventory)}/50),建议调整背包"+COLOR_RESET)
-    if len(GAME.variables) > 35:
+              f"*物品数超过35个({len(game.inventory)}/50),建议调整背包"+COLOR_RESET)
+    if len(game.variables) > 35:
         print(COLOR_YELLOW +
-              f"*变量数超过35个({len(GAME.variables)}),建议清理不必要变量"+COLOR_RESET)
+              f"*变量数超过35个({len(game.variables)}),建议清理不必要变量"+COLOR_RESET)
 
 
 def new_game(no_auto_load=False):
+    """
+    主游戏逻辑
+    """
     global extra_datas
     anime_loader = SyncLoadingAnimation()
     GAME = GameEngine(config)

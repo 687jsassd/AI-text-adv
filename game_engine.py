@@ -1,20 +1,24 @@
 # Copyright (c) 2025 [687jsassd]
 # MIT License
 # 游戏引擎
-import openai
 import json
 import time
 import random
 from math import atan
 from collections import deque
 from typing import Optional
+import openai
+from json_repair import repair_json
 from config import CustomConfig, COLOR_CYAN, COLOR_RESET, COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA
 from prompt_manager import PromptManager
-from json_repair import repair_json
 from animes import SyncLoadingAnimation, probability_check_animation
 
 
 class GameEngine:
+    """
+    游戏引擎
+    """
+
     def __init__(self, custom_config: Optional[CustomConfig] = None):
         # 基础部分
         self.game_id = ''
@@ -27,7 +31,7 @@ class GameEngine:
         self.current_description = "游戏开始"
         self.current_options = []
         self.current_game_status = "ongoing"
-        self.summary_conclude_val = 25  # 当历史剧情超过25条时，对其进行压缩总结;所有摘要都会参与剧情生成.
+        self.summary_conclude_val = 24  # 当历史剧情超过24条时，对其进行压缩总结;所有摘要都会参与剧情生成.
 
         # Token统计部分
         self.total_prompt_tokens = 0
@@ -88,12 +92,15 @@ class GameEngine:
 
         # 拓展-变量表
         self.variables = {
-            "玩家持有金钱": '0',
         }
 
     # 调用AI模型
 
     def call_ai(self, prompt: str):
+        """
+        调用AI模型
+        """
+
         max_tokens = self.custom_config.max_tokens
         temperature = self.custom_config.temperature
         frequency_penalty = self.custom_config.frequency_penalty
@@ -169,10 +176,13 @@ class GameEngine:
     # 解析AI响应
 
     def parse_ai_response(self, response: str):
+        """
+        解析AI响应
+        """
         json_content = "未解析"
-        # 把中文的引号和冒号替换为英文
+        # 把中文的引号和冒号、逗号替换为英文
         response = response.replace("“", '"').replace(
-            "”", '"').replace("：", ":")
+            "”", '"').replace("：", ":").replace('，', ',')
         try:
             start_idx = response.find('{')
             end_idx = response.rfind('}')
@@ -282,10 +292,9 @@ class GameEngine:
 
     # 指令处理
     def handle_command(self, commands: list):
-        # "commands": [
-        #        {"command": "add_item", "value": {"道具名":"道具描述"}},
-        #        {"command": "remove_item", "value": "道具名"}
-        # ]
+        """
+        处理指令
+        """
         for command in commands:
             if not isinstance(command, dict):
                 input(f'注意：指令{command}出错！\n\n{commands}')
@@ -400,6 +409,9 @@ class GameEngine:
     # 开始游戏
 
     def start_game(self, st_story: str = ''):
+        """
+        开始游戏（第一轮）
+        """
         init_prompt = self.prompt_manager.get_initial_prompt(
             self.player_name,
             st_story,
@@ -425,42 +437,14 @@ class GameEngine:
         self.token_consumes.append(self.l_p_token+self.l_c_token)
 
     def go_game(self, option_id, is_custom=False, is_prompt_concluding=False):
+        """
+        进行游戏（后续轮次）
+        """
         if len(self.history_simple_summaries) > self.summary_conclude_val and not is_prompt_concluding and self.conclude_summary_cooldown < 1:
             self.go_game(option_id, is_custom, True)
         prompt = ""
         if is_prompt_concluding:
-            # 当所有摘要都经过了压缩，我们采取稀释旧摘要策略
-            if not any(i and len(i) < 450 for i in self.history_simple_summaries[:-1]):
-                prompt = self.prompt_manager.get_summary_prompt(
-                    '\n'.join([str(s) for s in self.history_simple_summaries[:10] if s is not None]))
-                self.anime_loader.stop_animation()
-                self.anime_loader.start_animation(
-                    "dot", message=COLOR_YELLOW+"正在总结历史剧情"+COLOR_RESET)
-                tmp = self.custom_config.max_tokens
-                self.custom_config.max_tokens = 20480
-                summary = self.call_ai(prompt)
-                self.custom_config.max_tokens = tmp
-                self.anime_loader.stop_animation()
-                self.history_simple_summaries = [
-                    summary]+self.history_simple_summaries[10:]
-                self.conclude_summary_cooldown = 10
-                self.token_consumes[-1] += self.l_p_token+self.l_c_token
-                return 0
-            # 否则，我们只总结新摘要，形成压缩摘要
-            prompt = self.prompt_manager.get_summary_prompt(
-                "\n".join([i for i in self.history_simple_summaries if i and len(i) < 450]))
-            self.anime_loader.stop_animation()
-            self.anime_loader.start_animation(
-                "dot", message=COLOR_YELLOW+"正在总结历史剧情"+COLOR_RESET)
-            tmp = self.custom_config.max_tokens
-            self.custom_config.max_tokens = 2048
-            summary = self.call_ai(prompt)
-            self.custom_config.max_tokens = tmp
-            self.anime_loader.stop_animation()
-            self.history_simple_summaries = [
-                i for i in self.history_simple_summaries if i and len(i) >= 450] + [summary]
-            self.conclude_summary_cooldown = 10
-            self.token_consumes[-1] += self.l_p_token+self.l_c_token
+            self.conclude_summary()
             return 0
         if is_custom:
             selected_option = {"id": 999,
@@ -672,6 +656,7 @@ class GameEngine:
         return 0
 
     def get_token_stats(self):
+        """获取token统计信息"""
         return {
             "本次输入消耗": self.l_p_token,
             "本次生成消耗": self.l_c_token,
@@ -991,3 +976,96 @@ class GameEngine:
                 finally_text.append(i)
         finally_text.append(COLOR_RESET)  # 强制重置颜色
         return ''.join(finally_text)
+
+    def conclude_summary(self):
+        """
+        总结摘要，清理无用物品和变量
+        """
+        def phase_summary(resp):
+            try:
+                r = json.loads(repair_json(resp))
+                summ = r["summary"]
+                rmv_item = r["rmv_item"]
+                rmv_var = r["rmv_var"]
+                return 1, summ, rmv_item, rmv_var
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"[警告]:总结历史剧情时解析json失败{resp}，错误信息：{e}")
+                return 0, "", [], []
+
+        # 当所有摘要都经过了压缩，我们采取稀释旧摘要策略
+        if not any(i and len(i) < 400 for i in self.history_simple_summaries[:-1]):
+            prompt = self.prompt_manager.get_summary_prompt(
+                '\n'.join(
+                    [str(s) for s in self.history_simple_summaries[:10] if s is not None]),
+                self.get_inventory_text_for_prompt(),
+                self.get_vars_text())
+            self.anime_loader.stop_animation()
+            self.anime_loader.start_animation(
+                "dot", message=COLOR_YELLOW+"正在总结历史剧情 并清理无用信息"+COLOR_RESET)
+            tmp = self.custom_config.max_tokens
+            self.custom_config.max_tokens = 20480
+            summary = self.call_ai(prompt)
+            self.custom_config.max_tokens = tmp
+            self.anime_loader.stop_animation()
+            ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
+            while not ok_sign:
+                input(f"[警告]:总结历史剧情时解析json失败{summary}，按任意键重试")
+                summary = self.call_ai(prompt)
+                ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
+            self.history_simple_summaries = [
+                summ]+self.history_simple_summaries[10:]
+            for item in rmv_item:
+                self.iremove_item(item)
+            for var in rmv_var:
+                self.idel_var(var)
+            self.conclude_summary_cooldown = 10
+            self.token_consumes[-1] += self.l_p_token+self.l_c_token
+            return 0
+        # 否则，我们只总结新摘要，形成压缩摘要
+        prompt = self.prompt_manager.get_summary_prompt(
+            "\n".join(
+                [i for i in self.history_simple_summaries if i and len(i) < 400]),
+            self.get_inventory_text_for_prompt(),
+            self.get_vars_text())
+        self.anime_loader.stop_animation()
+        self.anime_loader.start_animation(
+            "dot", message=COLOR_YELLOW+"正在总结历史剧情"+COLOR_RESET)
+        tmp = self.custom_config.max_tokens
+        self.custom_config.max_tokens = 2048
+        summary = self.call_ai(prompt)
+        self.custom_config.max_tokens = tmp
+        self.anime_loader.stop_animation()
+        ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
+        while not ok_sign:
+            input(f"[警告]:总结历史剧情时解析json失败{summary}，按任意键重试")
+            summary = self.call_ai(prompt)
+            ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
+        self.history_simple_summaries = [
+            i for i in self.history_simple_summaries if i and len(i) >= 400] + [summ]
+        for item in rmv_item:
+            self.iremove_item(item)
+        for var in rmv_var:
+            self.idel_var(var)
+        self.conclude_summary_cooldown = 10
+        self.token_consumes[-1] += self.l_p_token+self.l_c_token
+        return 0
+
+    def iremove_item(self, item: str):
+        """
+        构造命令，从物品列表中移除物品
+        """
+        commands = [{
+            "command": "remove_item",
+            "item": item
+        }]
+        self.handle_command(commands)
+
+    def idel_var(self, var: str):
+        """
+        构造命令，从变量列表中移除变量
+        """
+        commands = [{
+            "command": "del_var",
+            "var": var
+        }]
+        self.handle_command(commands)

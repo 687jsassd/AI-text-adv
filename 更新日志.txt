@@ -1,3 +1,10 @@
+v0.1.6b 25-12-22
+总结摘要时，加入了一并筛选无用变量、物品并去除的功能；
+独立出了conclude_summary函数，添加了iremove_item 与idel_var函数
+提示词优化
+
+*需要测试实际token消耗的平缓效果
+
 v0.1.6 25-12-21
 添加变量表，现在可以设定变量并参与剧情，并完成了金钱变量
 整合了llm配置相关json，优化了config结构(感谢returnToInnocence 贡献)
