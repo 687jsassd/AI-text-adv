@@ -469,16 +469,16 @@ def display_options(GAME: GameEngine):
         if opt["type"] == "check":
             # 根据几率来添加不同提示
             if opt["probability"] < 0.05-fix_value:
-                print(f"[{COLOR_RED}✘{COLOR_RESET}]", end="")
+                print(f"[{COLOR_RED}✘{COLOR_RESET}]")
                 has_danger = True
             elif opt["probability"] < 0.25-fix_value:
-                print(f"[{COLOR_RED}!{COLOR_RESET}]", end="")
+                print(f"[{COLOR_RED}!{COLOR_RESET}]")
                 has_danger = True
             elif opt["probability"] < 0.70-fix_value:
-                print(f"[{COLOR_YELLOW}?{COLOR_RESET}]", end="")
+                print(f"[{COLOR_YELLOW}?{COLOR_RESET}]")
                 has_event = True
             else:
-                print(f"[{COLOR_GREEN}▲{COLOR_RESET}]", end="")
+                print(f"[{COLOR_GREEN}▲{COLOR_RESET}]")
                 has_goods = True
         elif opt["type"] == "must":
             if chara_attrs.get(opt["main_factor"], 0) >= opt["difficulty"]:
