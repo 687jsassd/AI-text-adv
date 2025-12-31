@@ -5,8 +5,21 @@
 # Copyright (c) 2025 [687jsassd]
 # MIT License
 import os
+import sys
 import json
 from datetime import datetime
+
+if getattr(sys, 'frozen', False):
+    # 打包后：exe所在目录（处理符号链接/中文路径）
+    exe_path = os.path.abspath(sys.executable)
+    root_path = os.path.dirname(exe_path)
+else:
+    # 未打包：脚本所在目录（双击py时，__file__是绝对路径，不受CWD影响）
+    script_path = os.path.abspath(__file__)
+    root_path = os.path.dirname(script_path)
+# 强制切换工作目录到程序根目录
+os.chdir(root_path)
+
 
 LOG_DIR = "logs"
 CURRENT_TIME = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -239,7 +252,7 @@ class CustomConfig:
                 print(f"3.频率惩罚 [{self.frequency_penalty}]")
                 print(f"4.存在惩罚 [{self.presence_penalty}]")
                 print(f"5.玩家姓名 [{self.player_name}]")
-                print(f"6.玩家故事 [{self.player_story}]")
+                print(f"6.玩家故事(注意:重启生效) [{self.player_story}]")
                 print(f"7.偏好:色情 [{self.frequency_reflect[self.porn_value]}]")
                 print(
                     f"8.偏好:特别暴力 [{self.frequency_reflect[self.violence_value]}]")

@@ -301,7 +301,7 @@ AI-game-test/
 ## 打包为exe文件的说明
 
 1. 安装pyinstaller：`pip install pyinstaller`
-2. 建议打包命令: `pyinstaller --noconfirm --clean --onedir --icon ".\icon.ico" --add-data ".\config;config/" --add-data ".\logs;logs/" --add-data ".\saves;saves/" --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module matplotlib ".\main.py"`
+2. 建议打包命令: `pyinstaller --noconfirm --clean --onedir --icon ".\icon.ico" --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module matplotlib ".\main.py"`
   * 查阅main.spec 以了解详细配置
 3. 在`dist/`目录下找到生成的exe文件
 

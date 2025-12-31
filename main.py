@@ -7,19 +7,34 @@ from typing import Tuple
 from datetime import datetime
 import json
 import os
-from game_engine import GameEngine
+import sys
 from config import (LOG_DIR,
                     CURRENT_TIME,
                     CustomConfig)
-from libs.animes import display_narrative_with_typewriter, SyncLoadingAnimation
+from libs.event_manager import CommandManager
 from libs.practical_funcs import (clear_screen,
                                   COLOR_GREEN,
                                   COLOR_RESET,
                                   COLOR_RED,
                                   COLOR_YELLOW,
                                   generate_game_id,
-                                  find_file_by_name)
-from libs.event_manager import CommandManager
+                                  find_file_by_name,
+                                  )
+from libs.animes import display_narrative_with_typewriter, SyncLoadingAnimation
+from game_engine import GameEngine
+
+
+if getattr(sys, 'frozen', False):
+    # 打包后：exe所在目录（处理符号链接/中文路径）
+    exe_path = os.path.abspath(sys.executable)
+    root_path = os.path.dirname(exe_path)
+else:
+    # 未打包：脚本所在目录（双击py时，__file__是绝对路径，不受CWD影响）
+    script_path = os.path.abspath(__file__)
+    root_path = os.path.dirname(script_path)
+# 强制切换工作目录到程序根目录
+os.chdir(root_path)
+
 
 VERSION = "0.1.6c"
 
