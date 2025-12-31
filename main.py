@@ -107,7 +107,7 @@ def save_game(game_engine, extra_datas: ExtraData, save_name="autosave", is_manu
             "history_descriptions": game_engine.history_descriptions,
             "history_choices": game_engine.history_choices,
             "history_simple_summaries": game_engine.history_simple_summaries,
-            "inventory": game_engine.inventory,
+            "inventory": game_engine.item_system.inventory,
             # "conversation_history": game_engine.conversation_history,
             "total_turns": len(game_engine.history_descriptions),
             "total_prompt_tokens": game_engine.total_prompt_tokens,
@@ -133,7 +133,7 @@ def save_game(game_engine, extra_datas: ExtraData, save_name="autosave", is_manu
             "situation_value": game_engine.situation,
             "token_consumes": game_engine.token_consumes,
             "extra_datas": extra_datas.to_dict(),
-            "item_repo": game_engine.item_repository,
+            "item_repo": game_engine.item_system.item_repository,
             "is_no_options": game_engine.prompt_manager.is_no_options,
             "variables": game_engine.variables,
         }
@@ -246,7 +246,7 @@ def load_game(game_engine, extra_datas: ExtraData, save_name="autosave", filenam
         game_engine.history_descriptions = save_data["history_descriptions"]
         game_engine.history_choices = save_data["history_choices"]
         game_engine.history_simple_summaries = save_data["history_simple_summaries"]
-        game_engine.inventory = save_data["inventory"]
+        game_engine.item_system.inventory = save_data["inventory"]
         # game_engine.conversation_history = save_data["conversation_history"]
         game_engine.total_prompt_tokens = save_data["total_prompt_tokens"]
         game_engine.l_p_token = save_data["last_prompt_tokens"]
@@ -256,7 +256,7 @@ def load_game(game_engine, extra_datas: ExtraData, save_name="autosave", filenam
         game_engine.character_attributes = save_data["character_attributes"]
         game_engine.situation = save_data["situation_value"]
         game_engine.token_consumes = save_data["token_consumes"]
-        game_engine.item_repository = save_data["item_repo"]
+        game_engine.item_system.item_repository = save_data["item_repo"]
         game_engine.prompt_manager.is_no_options = save_data["is_no_options"]
         game_engine.variables = save_data["variables"]
 
