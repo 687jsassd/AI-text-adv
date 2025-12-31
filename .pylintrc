@@ -1,0 +1,4 @@
+[MASTER]
+disable=
+    broad-exception-caught,
+    line-too-long,

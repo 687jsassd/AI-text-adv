@@ -1,3 +1,6 @@
+"""
+游戏引擎
+"""
 # Copyright (c) 2025 [687jsassd]
 # MIT License
 # 游戏引擎
@@ -9,9 +12,18 @@ from collections import deque
 from typing import Optional
 import openai
 from json_repair import repair_json
-from config import CustomConfig, COLOR_CYAN, COLOR_RESET, COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA
-from prompt_manager import PromptManager
-from animes import SyncLoadingAnimation, probability_check_animation
+from config import CustomConfig
+from libs.practical_funcs import (text_colorize,
+                                  COLOR_CYAN,
+                                  COLOR_RESET,
+                                  COLOR_RED,
+                                  COLOR_GREEN,
+                                  COLOR_YELLOW,
+                                  COLOR_BLUE,
+                                  COLOR_MAGENTA)
+from libs.prompt_manager import PromptManager
+from libs.animes import SyncLoadingAnimation, probability_check_animation
+from libs.extra_item_inventory import ItemInventory
 
 
 class GameEngine:
@@ -45,13 +57,11 @@ class GameEngine:
 
         # 玩家相关部分
         self.player_name = self.custom_config.player_name
-        self.prompt_manager.prompts_sections["user_story"] = self.custom_config.player_story
+        self.prompt_manager.iset_user_story(self.custom_config.player_story)
 
         # 动画
         self.anime_loader = SyncLoadingAnimation()
 
-        # 拓展-背包与道具(道具格式:{道具名:道具描述})
-        self.inventory = {}
         # 拓展-玩家属性
         self.character_attributes = {
             "STR": 10.0,
@@ -84,11 +94,8 @@ class GameEngine:
         # 用于解决当压缩摘要占很多格子导致普通摘要没添加几个就总结时，间隔过短的问题。
         self.conclude_summary_cooldown = 10
 
-        # 拓展-物品仓库(用于存储物品,不参与剧情)
-        self.item_repository = {}
-
-        # 拓展-是否无选项模式
-        self.prompt_manager.is_no_options = False
+        # 拓展-物品(用于存储物品,不参与剧情)
+        self.item_system = ItemInventory()
 
         # 拓展-变量表
         self.variables = {
@@ -100,23 +107,19 @@ class GameEngine:
         """
         调用AI模型
         """
-
         max_tokens = self.custom_config.max_tokens
         temperature = self.custom_config.temperature
         frequency_penalty = self.custom_config.frequency_penalty
         presence_penalty = self.custom_config.presence_penalty
-
         provider = self.custom_config.get_current_provider()
         model_name = provider["model"]
         api_key = provider["api_key"]
         base_url = provider["base_url"]
-
         try:
             client = openai.OpenAI(
                 api_key=api_key,
                 base_url=base_url,
             )
-
             # 构建请求参数字典
             params = {
                 "model": model_name,
@@ -125,18 +128,20 @@ class GameEngine:
                 "temperature": temperature,
                 "frequency_penalty": frequency_penalty,
                 "presence_penalty": presence_penalty,
-                "timeout": 100,
+                "timeout": openai.Timeout(
+                    connect=10.0,
+                    read=100.0,
+                    write=20.0,
+                    pool=5.0
+                )
             }
-
             # 混元不支持frequency_penalty,presence_penalty,如果模型是混元，去掉这两条
             if "hunyuan" in model_name:
                 del params["frequency_penalty"]
                 del params["presence_penalty"]
                 params["extra_body"] = {}
-
             # 调用API
             response = client.chat.completions.create(**params)
-
             # 记录token使用情况
             if hasattr(response, 'usage'):
                 self.total_prompt_tokens += response.usage.prompt_tokens
@@ -145,8 +150,7 @@ class GameEngine:
                 self.l_c_token = response.usage.completion_tokens
                 self.total_tokens += response.usage.total_tokens
                 print(
-                    f"Token消耗 - 提示: {response.usage.prompt_tokens}, 完成: {response.usage.completion_tokens}, 总计: {response.usage.total_tokens}")
-
+                    f"\nToken消耗 - 提示词: {response.usage.prompt_tokens}, 输出: {response.usage.completion_tokens}, 总计: {response.usage.total_tokens}")
             self.current_response = response.choices[0].message.content
             if self.current_response:
                 # 有响应内容时直接返回
@@ -162,15 +166,16 @@ class GameEngine:
                     # 提取完整的JSON部分
                     self.current_response = self.current_response[start_idx:end_idx+1]
                     return self.current_response
+        except openai.APITimeoutError:
+            self.anime_loader.stop_animation()
+            print("相应超时 - 检查网络或者向我们反馈?")
+            print(f"当前配置:model={model_name},base_url={base_url}")
+            input("按任意键继续")
+            return None
         except (openai.OpenAIError, ValueError) as e:
+            self.anime_loader.stop_animation()
             print(f"调用AI模型时出错: {e}")
             input("按任意键继续")
-            self.anime_loader.stop_animation()
-            return None
-        except TimeoutError:
-            print("调用AI模型超时(100s)")
-            input("按任意键继续")
-            self.anime_loader.stop_animation()
             return None
 
     # 解析AI响应
@@ -195,15 +200,16 @@ class GameEngine:
 
             json_response = json.loads(repair_json(json_content))
             while not isinstance(json_response, dict):
-                input(f"未能解析JSON响应??\n {json_response}")
+                print(f"未能解析JSON响应??\n {json_response}")
                 if isinstance(json_response, list):
-                    input("列表类型？尝试第一个元素")
+                    print("列表类型？尝试第一个元素")
                     json_response = json_response[0]
                 elif isinstance(json_response, str):
-                    input("字符串类型？尝试解析为JSON")
+                    print("字符串类型？尝试解析为JSON")
                     json_response = json.loads(json_response)
                 else:
-                    input("按任意键重试")
+                    self.anime_loader.stop_animation()
+                    input("解析JSON失败！")
                     return None
             try:
                 # 检查是否有指令(commands),有则执行
@@ -213,11 +219,11 @@ class GameEngine:
                     self.handle_command(commands)
             except (ValueError, TypeError) as e:
                 print(f"解析指令时出错: {e}")
-                input("已跳过指令处理,按任意键继续解析")
+                input("已跳过指令处理,按任意键继续解析\n")
 
             self.current_options = json_response.get("options", [])
             if not self.current_options and not self.prompt_manager.is_no_options:
-                input(f"未能解析选项?? 按键重试 {json_response}")
+                input(f"未能解析选项?? 按键重试 {json_response}\n")
                 return None
             elif self.prompt_manager.is_no_options:
                 self.current_options = [{
@@ -231,7 +237,7 @@ class GameEngine:
                 }]
             self.current_description = json_response.get("description", "")
             if not self.current_description.strip():
-                input(f"未能解析描述?? 按键重试 {json_response}")
+                input(f"未能解析描述?? 按键重试 {json_response}\n")
                 return None
             if self.current_description:
                 self.history_simple_summaries.append(
@@ -253,7 +259,7 @@ class GameEngine:
                     })
                 except (ValueError, TypeError) as e:
                     print(f"解析某选项时出错: {e},选项: {option}")
-                    input("已跳过该选项,按任意键继续解析")
+                    input("已跳过该选项,按任意键继续解析\n")
 
             self.current_options = tmp
             # 规范化选项，去除不是check但有probability的选项的probability条目
@@ -271,17 +277,18 @@ class GameEngine:
                         option["main_factor"] = "LUK"
 
             # 美化描述
-            self.current_description = self.colorize(
+            self.current_description = text_colorize(
                 self.current_description)
             for option in self.current_options:
                 if option["next_preview"]:
-                    option["next_preview"] = self.colorize(
+                    option["next_preview"] = text_colorize(
                         option["next_preview"])
                 # 对选项文本也美化
-                option["text"] = self.colorize(option["text"])
+                option["text"] = text_colorize(option["text"])
 
             return json_response
         except (ValueError, json.JSONDecodeError) as e:
+            self.anime_loader.stop_animation()
             print(f"解析AI响应时出错: {e}")
             print("响应内容:")
             print(response)
@@ -297,7 +304,7 @@ class GameEngine:
         """
         for command in commands:
             if not isinstance(command, dict):
-                input(f'注意：指令{command}出错！\n\n{commands}')
+                input(f'注意：指令{command}出错！\n\n{commands}\n')
                 continue
             command_type = command.get("command")
             value = command.get("value")
@@ -318,11 +325,11 @@ class GameEngine:
                             item_name = item_name.strip('"').strip("'")
                             item_desc = item_desc.strip('"').strip("'")
                     # 调用修复函数，继续深层修复
-                    self.fix_item_name_error()
+                    self.item_system.fix_item_name_error()
                     # 如果已经有这个道具就不添加
-                    if item_name in self.inventory:
+                    if item_name in self.item_system.inventory:
                         return
-                    self.inventory[item_name] = item_desc
+                    self.item_system.inventory[item_name] = item_desc
                     # self.history_simple_summaries.append(
                     #    f"{self.custom_config.player_name}获得了道具{item_name}")
                     self.message_queue.append(
@@ -331,8 +338,8 @@ class GameEngine:
                     print(f"[警告]:添加道具时未提供道具信息或者信息格式不正确{command}")
             elif command_type == "remove_item":
                 if value:
-                    if value in self.inventory:
-                        del self.inventory[value]
+                    if value in self.item_system.inventory:
+                        del self.item_system.inventory[value]
                         # self.history_simple_summaries.append(
                         #    f"{self.custom_config.player_name}失去了道具{value}")
                         self.message_queue.append(
@@ -388,13 +395,13 @@ class GameEngine:
                 if value:
                     print(f"[调试]:设置变量时提供的信息{value}")
                     if not isinstance(value, dict):
-                        input(f"[警告]:设置变量时提供的信息格式错误{command}")
+                        print(f"[警告]:设置变量时提供的信息格式错误{command}")
                         continue
                     # 解析变量名和变量值(为多变量设置提供支持)
                     for var_name, var_value in value.items():
                         self.variables[var_name] = var_value
                 else:
-                    input(f"[警告]:设置变量时未提供变量信息{command}")
+                    print(f"[警告]:设置变量时未提供变量信息{command}")
             elif command_type == "del_var":
                 if value:
                     # 解析变量名
@@ -416,18 +423,19 @@ class GameEngine:
             self.player_name,
             st_story,
             self.custom_config.get_custom_prompt(),
-            self.get_inventory_text_for_prompt(),
+            self.item_system.get_inventory_text_for_prompt(),
             self.get_attribute_text())
         # self.conversation_history.append(
         #    {"role": "user", "content": init_prompt})
         ai_response = self.call_ai(init_prompt)
         while not ai_response:
-            input('无响应内容？任意键重试')
+            input('无响应内容？任意键重试\n')
             ai_response = self.call_ai(init_prompt)
         if ai_response:
             ok_sign = self.parse_ai_response(ai_response)
             while not ok_sign:
-                input(f"解析失败，按任意键重试.[注意Token消耗{self.total_tokens}]")
+                self.anime_loader.stop_animation()
+                input(f"解析失败，按任意键重试.[注意Token消耗{self.total_tokens}]\n")
                 ai_response = self.call_ai(init_prompt)
                 if ai_response:
                     ok_sign = self.parse_ai_response(ai_response)
@@ -456,7 +464,7 @@ class GameEngine:
                 '\n'.join(
                     [i for i in self.history_simple_summaries[-7:] if i]),
                 option_id,
-                self.get_inventory_text_for_prompt(),
+                self.item_system.get_inventory_text_for_prompt(),
                 self.get_attribute_text(),
                 self.get_situation_text(),
                 self.custom_config.get_custom_prompt(),
@@ -488,6 +496,7 @@ class GameEngine:
                         selected_option["extra"] = "custom_action"
                         ok_sign = True
                     except (ValueError, json.JSONDecodeError) as e:
+                        self.anime_loader.stop_animation()
                         print(f"解析AI响应时出错: {e}")
                         input(
                             f"按任意键重试,注意token消耗(本次){self.l_c_token+self.l_p_token}")
@@ -593,7 +602,7 @@ class GameEngine:
                 selected_option["text"],
                 selected_option["next_preview"],
                 self.custom_config.get_custom_prompt(),
-                self.get_inventory_text_for_prompt(),
+                self.item_system.get_inventory_text_for_prompt(),
                 self.get_attribute_text(),
                 self.get_situation_text(),
                 self.get_vars_text())
@@ -640,13 +649,14 @@ class GameEngine:
             self.current_description,
             "\n".join(
                 [str(s) for s in self.history_simple_summaries[:-1] if s is not None]),
-            self.get_inventory_text_for_prompt(),
+            self.item_system.get_inventory_text_for_prompt(),
             self.get_situation_text())
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation("dot", message="思考中")
         res = self.call_ai(prompt)
         while not res:
-            input(f"AI响应失败，按任意键重试.[注意Token消耗{self.total_tokens}]")
+            self.anime_loader.stop_animation()
+            input(f"AI响应失败，按任意键重试.[注意Token消耗{self.total_tokens}]\n")
             res = self.call_ai(prompt)
         self.current_description += "\n\n" + \
             COLOR_BLUE+f"[思考:{think_context}] "+COLOR_RESET+res
@@ -666,24 +676,6 @@ class GameEngine:
             "全局总token消耗量": self.total_tokens,
         }
 
-    def get_inventory_text(self, need_desc=True):
-        """获取当前道具列表的文本描述"""
-        if not self.inventory:
-            return "当前没有道具"
-        nums_text = f"{len(self.inventory)}" if len(
-            self.inventory) <= 50 else f"{len(self.inventory)},但其中{len(self.inventory)-50}个道具不会参与剧情。如想，尝试丢弃物品？"
-        available_items = self.inventory.items() if len(
-            self.inventory) <= 50 else list(self.inventory.items())[-50:]
-        no_available_items = list(self.inventory.items())[:-50] if len(
-            self.inventory) > 50 else []
-        return f"当前道具列表（{nums_text}）：\n" + "\n".join([f"{idx+1}.{COLOR_YELLOW}{item}{COLOR_RESET}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(available_items)] + [f"{idx+len(available_items)+1}.{COLOR_RED}[✘]{item}{COLOR_RESET}: {desc}" for idx, (item, desc) in enumerate(no_available_items)])
-
-    def get_item_repository_text(self, need_desc=True):
-        """获取物品仓库的文本描述"""
-        if not self.item_repository:
-            return "物品仓库当前没有道具"
-        return f"物品仓库当前道具列表（{len(self.item_repository)}）：\n" + "\n".join([f"{idx+1}.{COLOR_YELLOW}{item}{COLOR_RESET}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(self.item_repository.items())])
-
     def get_attribute_text(self, colorize=False):
         """获取当前属性列表的文本描述"""
         if not self.character_attributes:
@@ -700,15 +692,6 @@ class GameEngine:
             """
             return ret
         return "玩家属性：\n" + "\n".join([f"{attr}: {value}" for attr, value in self.character_attributes.items()])
-
-    def get_inventory_text_for_prompt(self):
-        """获取当前道具列表的文本描述，更简洁"""
-        if not self.inventory:
-            return "玩家当前没有道具"
-        if len(self.inventory) <= 12:
-            return "当前道具列表：\n" + "\n".join([f"{COLOR_YELLOW}{item}{COLOR_RESET}(描述:{desc})" for item, desc in self.inventory.items()])
-        else:
-            return "当前持有道具：\n" + "\n".join([f"{item}(描述:{desc})" for item, desc in self.inventory.items()][-25:]) + f"\n以及过去的道具:{', '.join([item for item, desc in self.inventory.items()][-35:-12])}"
 
     def get_situation_text(self, add_numbers=False):
         """获取当前形势的文本描述"""
@@ -772,30 +755,6 @@ class GameEngine:
                 clean_desc = clean_text(desc)
                 clean_choice = clean_text(choice)
                 f.write(f"{clean_desc}\n{clean_choice}\n\n")
-
-    def fix_item_name_error(self):
-        """修复物品名中的错误"""
-        fixed_dict = {}
-        for item in self.inventory.keys():
-            if self.inventory[item] != "无描述":
-                fixed_dict[item] = self.inventory[item]
-                continue
-            cur_texts = []
-            name = ""
-            for i in item:
-                if i == ':':
-                    name = "".join(cur_texts)
-                    cur_texts = []
-                    continue
-                if i not in ['"', "'", '{', '}']:
-                    cur_texts.append(i)
-            # 如果无道具名但有描述，则描述去除逗号、句号作为道具名
-            if name == "" and not cur_texts:
-                name = "".join(cur_texts).replace(',', '').replace(
-                    '.', '').replace('，', '').replace('。', '')
-                cur_texts = ["无描述"]
-            fixed_dict[name] = "".join(cur_texts)
-        self.inventory = fixed_dict
 
     def print_all_messages_await(self):
         """打印所有待显示消息"""
@@ -917,7 +876,7 @@ class GameEngine:
             cur_desc=self.current_description,
             player_move=player_move,
             focus_item=focus_item,
-            focus_item_desc=self.inventory[focus_item],
+            focus_item_desc=self.item_system.inventory[focus_item],
             target=target
         )
         response = self.call_ai(prompt)
@@ -930,52 +889,6 @@ class GameEngine:
             is_ok = False
         self.token_consumes[-1] += self.l_p_token+self.l_c_token
         return is_ok
-
-    def colorize(self, text: str):
-        """
-        对文本进行颜色美化
-        """
-        remain_color_stack = [COLOR_RESET]  # 用于修正嵌套错误
-        remain_need_close_chars_stack = []
-        finally_text = []  # 用于避免频繁创建字符串
-        current_printing_color = COLOR_RESET
-        color_convert_dict = {
-            "<": COLOR_MAGENTA,
-            "[": COLOR_CYAN,
-            "『": COLOR_YELLOW,
-            "《": COLOR_MAGENTA,
-            "「": COLOR_GREEN,
-        }
-        close_chars = {
-            ">": "<",
-            "]": "[",
-            "』": "『",
-            "》": "《",
-            "」": "「",
-        }
-        # 从开始向字符串末尾逐字符扫描替换
-        for i in text:
-            if i in color_convert_dict:
-                current_printing_color = color_convert_dict[i]
-                remain_need_close_chars_stack.append(i)
-                remain_color_stack.append(current_printing_color)
-                finally_text.append(current_printing_color+i)
-            elif i in close_chars:
-                if remain_need_close_chars_stack and remain_need_close_chars_stack[-1] == close_chars[i]:
-                    remain_need_close_chars_stack.pop()
-                else:
-                    input(f"[文本美化]注意：不符合预期的文本嵌套结构{text}\n 文本将不会被美化 \n按任意键继续")
-                    return text
-                if remain_color_stack:
-                    remain_color_stack.pop()
-                    current_printing_color = remain_color_stack[-1] if remain_color_stack else COLOR_RESET
-                    finally_text.append(i+current_printing_color)
-                else:
-                    finally_text.append(i+COLOR_RESET)
-            else:
-                finally_text.append(i)
-        finally_text.append(COLOR_RESET)  # 强制重置颜色
-        return ''.join(finally_text)
 
     def conclude_summary(self):
         """
@@ -997,7 +910,7 @@ class GameEngine:
             prompt = self.prompt_manager.get_summary_prompt(
                 '\n'.join(
                     [str(s) for s in self.history_simple_summaries[:10] if s is not None]),
-                self.get_inventory_text_for_prompt(),
+                self.item_system.get_inventory_text_for_prompt(),
                 self.get_vars_text())
             self.anime_loader.stop_animation()
             self.anime_loader.start_animation(
@@ -1025,7 +938,7 @@ class GameEngine:
         prompt = self.prompt_manager.get_summary_prompt(
             "\n".join(
                 [i for i in self.history_simple_summaries if i and len(i) < 400]),
-            self.get_inventory_text_for_prompt(),
+            self.item_system.get_inventory_text_for_prompt(),
             self.get_vars_text())
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation(

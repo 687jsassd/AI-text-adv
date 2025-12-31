@@ -1,3 +1,6 @@
+"""
+提供同步加载动画类，用于在AI生成或加载时显示等待动画
+"""
 from typing import Optional, Callable
 import threading
 import time
@@ -110,12 +113,12 @@ class SyncLoadingAnimation:
 
             # 计算进度（循环显示）
             progress = (progress + 1) % (bar_length + 1)
-            bar = "█" * progress + "░" * (bar_length - progress)
+            barr = "█" * progress + "░" * (bar_length - progress)
             percentage = int((progress / bar_length) * 100)
 
             # 显示进度条
             sys.stdout.write(
-                f"\r{color}Wait{reset_color} {message} [{bar}] {percentage}%{time_str}")
+                f"\r{color}Wait{reset_color} {message} [{barr}] {percentage}%{time_str}")
             sys.stdout.flush()
 
             time.sleep(delay)
@@ -428,3 +431,39 @@ def probability_check_animation(success_prob: float,
         f"\r{result_color}🎯 检定{result_text}: {success_prob:.2f}/{target_prob:.2f}{reset_color}")
     sys.stdout.flush()
     print()  # 换行
+
+
+def display_narrative_with_typewriter(narr: str,
+                                      separator: str = "",
+                                      color: str = "") -> bool:
+    """
+    增强版的叙述显示函数，带有打字机效果
+
+    Args:
+        narr: 叙述文本
+        separator: 分隔线
+        color: 颜色代码
+
+    Returns:
+        bool: 是否被用户中断
+    """
+    print("\n" + separator)
+
+    paras = narr.split("\n")
+    interrupted = False  # 这里关闭中断功能
+
+    for para in paras:
+        if para.strip() and not interrupted:
+            para_interrupted = typewriter_narrative(
+                para.strip(),
+                color=color,
+                suffix="\n"
+            )
+            if para_interrupted:
+                interrupted = True
+                break
+
+    if not interrupted:
+        print(separator)
+
+    return interrupted
