@@ -246,13 +246,14 @@ class CustomConfig:
         is_exit = False
         while not is_exit:
             try:
+                os.system('cls' if os.name == 'nt' else 'clear')
                 print("输入你想要配置的参数:")
                 print(f"1.最大输出Token [{self.max_tokens}]")
                 print(f"2.温度 [{self.temperature}]")
                 print(f"3.频率惩罚 [{self.frequency_penalty}]")
                 print(f"4.存在惩罚 [{self.presence_penalty}]")
                 print(f"5.玩家姓名 [{self.player_name}]")
-                print(f"6.玩家故事(注意:重启生效) [{self.player_story}]")
+                print(f"6.玩家故事(中途修改则重启生效) [{self.player_story}]")
                 print(f"7.偏好:色情 [{self.frequency_reflect[self.porn_value]}]")
                 print(
                     f"8.偏好:特别暴力 [{self.frequency_reflect[self.violence_value]}]")

@@ -40,8 +40,9 @@ def text_colorize(text: str):
         "<": COLOR_MAGENTA,
         "[": COLOR_CYAN,
         "『": COLOR_YELLOW,
-        "《": COLOR_MAGENTA,
+        "《": COLOR_RED,
         "「": COLOR_GREEN,
+        "【": COLOR_BLUE,
     }
     close_chars = {
         ">": "<",
@@ -49,6 +50,7 @@ def text_colorize(text: str):
         "』": "『",
         "》": "《",
         "」": "「",
+        "】": "【",
     }
     # 从开始向字符串末尾逐字符扫描替换
     for i in text:
@@ -61,7 +63,7 @@ def text_colorize(text: str):
             if rnccs and rnccs[-1] == close_chars[i]:
                 rnccs.pop()
             else:
-                input(f"\n[文本美化]注意：不符合预期的文本嵌套结构{text}\n 文本将不会被美化 \n按任意键继续")
+                print(f"\n[文本美化]注意：不符合预期的文本嵌套结构{text}\n 文本将不会被美化 \n按任意键继续")
                 return text
             if rcs:
                 rcs.pop()

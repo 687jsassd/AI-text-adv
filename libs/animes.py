@@ -237,7 +237,7 @@ def show_loading_animation(animation_type: str = "spinner",
 
 
 def typewriter_effect(text: str,
-                      delay: float = 0.03,
+                      delay: float = 0.02,
                       newline_delay: float = 0.1,
                       on_char_typed: Optional[Callable] = None,
                       on_complete: Optional[Callable] = None) -> bool:
@@ -301,7 +301,7 @@ def typewriter_narrative(text: str,
                          suffix: str = "",
                          color: str = "",
                          reset_color: str = "\033[0m",
-                         delay: float = 0.02) -> bool:
+                         delay: float = 0.01) -> bool:
     """
     专门用于游戏叙述的打字机效果
 
@@ -325,7 +325,7 @@ def typewriter_narrative(text: str,
     interrupted = typewriter_effect(
         colored_text,
         delay=delay,  # 稍快的速度
-        newline_delay=0.1,
+        newline_delay=0.05,
     )
 
     if suffix and not interrupted:

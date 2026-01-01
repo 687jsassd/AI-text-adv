@@ -39,14 +39,13 @@ class PromptManager:
         self.prompts_sections["output_format"] = """
         按照以下json格式输出：
                 {
-            "description": "主角修炼了一夜，总算入门了《太玄经》...",
-            "summary": "主角修炼了太玄经",
+            "description": "主角推开黄蓉，自己挨了一刀",
+            "summary": "主角为黄蓉挡刀",
             "options": [
                 {"id": 1, "text": "休息", "type": "normal", "next_preview": "你休息"}
             ],
             "commands": [
-                {"command": "add_item", "value": {'名称':'描述'}
-                },
+                {"command": "change_situation", "value": -2},
                 {"command": "set_var", "value": {'黄蓉好感度': '35'}}
             ]
         }
@@ -54,14 +53,14 @@ class PromptManager:
         1. 输出格式：不带转义符。用双引号。对话使用『』包裹。
         2. 字段详解：
            - description: 当前场景的详细描述。不要包含游戏机制、判定提示、剧情外内容。
-           - summary: 剧情摘要，保留剧情重要信息、潜在分支信息和NPC信息，35字左右。
+           - summary: 剧情摘要，保留剧情重要信息、潜在分支信息和NPC信息(尤其是行动、态度)，不超过60字。
            - options: 选项的列表，每个选项为一个对象。
                 * id: 唯一标识符，从1递增的整数。
                 * text: 选项的文本内容，禁止添加如[必须]、(需力量STR>=12）等提示！
                 * type: 选项类型，'normal'（常见）或'check'（需检定）或'must'（需门槛）
                 * main_factor : 仅当type为'check'或者'must'时有。表示检定或门槛的主属性依赖，从力量 STR 敏捷 DEX 智力 INT 感知 WIS 魅力 CHA 幸运LUK中选。
                 * difficulty: 仅type为'check'或者'must'时有，整数，表示检定难度和门槛。数值越大越困难。
-                * base_probability: 仅type为'check'时有，表示基本成功率，从-1到1的浮点数（0.02表示2%）。
+                * base_probability: 仅type为'check'时有，表示基本成功率，从-1到1的浮点数（0.32表示32%）。
                 * next_preview: 选择该选项后故事发展的开头一句话过渡。
            - commands: 在本剧情中操作游戏数据的指令列表，每个指令为一个对象。如无指令，则不加该字段。
                 * command: 指令类型，从['set_var','del_var,'add_item', 'remove_item', 'change_attr','change_situation','gameover']中选择。
@@ -73,7 +72,7 @@ class PromptManager:
                     - change_attribute: 改变属性
                         - value: 对象{属性名: 变动值}，属性名同main_factor，可负。
                         - desc: 变化原因。
-                    - change_situation_value: 改变形势值
+                    - change_situation: 改变形势值
                         - value: 变动量。为可负整数。
                     - gameover:令游戏失败。无value字段
         3. 规则与注意事项：
@@ -94,15 +93,13 @@ class PromptManager:
         4. 指令示例：
            - 消耗道具"力量丹"并获得1点STR属性：commands:[{"command": "remove_item", "value": "力量丹"}, {"command": "change_attribute", "value": {"STR": 1}}]
         """
-
         self.prompts_sections["output_format_no_options"] = """
         按照以下json格式输出：
                 {
-            "description": "主角修炼了一夜，总算入门了《太玄经》...",
-            "summary": "主角修炼了太玄经",
+            "description": "主角推开黄蓉，自己挨了一刀",
+            "summary": "主角为黄蓉挡刀",
             "commands": [
-                {"command": "add_item", "value": {'名称':'描述'}
-                },
+                {"command": "change_situation", "value": -2},
                 {"command": "set_var", "value": {'黄蓉好感度': '35'}}
             ]
         }
@@ -110,7 +107,7 @@ class PromptManager:
         1. 输出格式：不带转义符。用双引号。出现对话则使用『』包裹。
         2. 字段详解：
            - description: 当前场景的沉浸式详细描述。不要包含游戏机制、提示、剧情外内容。
-           - summary: 剧情摘要，保留剧情重要信息、潜在分支信息和NPC信息，35字左右。
+           - summary: 剧情摘要，保留剧情重要信息、潜在分支信息和NPC信息(尤其是行动、态度)，不超过60字。
            - commands: 在本剧情中操作游戏数据的指令列表，每个指令为一个对象。如无指令，则不添加该字段。
                 * command: 指令类型，从['set_var','del_var,'add_item', 'remove_item', 'change_attr','change_situation','gameover']中选择。
                 * value: 指令值，格式根据command而定。
@@ -121,7 +118,7 @@ class PromptManager:
                     - change_attribute: 改变属性
                         - value: 对象{属性名: 变动值}，属性名同main_factor，可负。
                         - desc: 变化原因。
-                    - change_situation_value: 改变形势值
+                    - change_situation: 改变形势值
                         - value: 为可负整数。
                     - gameover:令游戏失败。无value字段
         3. 规则与注意事项：
@@ -141,7 +138,7 @@ class PromptManager:
         规则：
         沉浸式文字游戏世界由玩家指定，你是AI主持人，剧情语言符合世界观.
         1. 玩家在世界中自由游玩或与NPC互动，玩家死亡则游戏失败。剧情根据玩家的选择及结果、属性、物品、变量而流畅变化。不出现追兵情节，战斗迅速不拖沓。
-        2. 每轮剧情生成100-200字，语言可带有细节、环境、人物外貌、心理、语言和道具的描述等描写，描写不重复。
+        2. 每轮生成135-250字新剧情，剧情多拓展，语言可带有细节、环境、人物外貌、心理、语言和道具的描述等描写，描写不重复。
         3. 不出现同类剧情。剧情不打断当前事件。剧情不强行带有事件引导，应该让玩家自由探索选择。
         4. 角色名字用[]包裹，特定称谓用<>包裹.
         5. 若要修改物品，应先移除物品，再添加修改后的物品。
@@ -151,12 +148,11 @@ class PromptManager:
         9. 生成选项只参考当前已知剧情，不可剧透未知信息。
         10.变量尽量只存储数值（字符串）；不存储剧情信息、开关等。
         """
-
         self.prompts_sections["world_rules_no_options"] = """
         规则：
         沉浸式文字游戏世界由玩家指定，你是AI主持人，剧情语言符合世界观。
         1. 玩家在世界中自由游玩或与NPC互动，玩家死亡则游戏失败。剧情根据玩家的选择及结果、属性、物品、变量而流畅变化。不出现追兵情节，战斗迅速不拖沓。
-        2. 每轮剧情生成100-200字，语言可带有细节、环境、人物外貌、心理、语言和道具的描述等描写，描写不重复。
+        2. 每轮生成135-250字新剧情，剧情多拓展，语言可带有细节、环境、人物外貌、心理、语言和道具的描述等描写，描写不重复。
         3. 不出现同类剧情。剧情不打断当前事件。剧情不强行带有事件引导，应该让玩家自由探索选择。
         4. 角色名字用[]包裹，特定称谓用<>包裹.
         5. 若要修改物品，应先移除物品，再添加修改后的物品。
@@ -172,7 +168,7 @@ class PromptManager:
 
         # 总结摘要用的提示词
         self.prompts_sections["summary_prompt"] = """
-        总结下面的摘要形成一段非常简明扼要的摘要总结，总结要着重详细记录重要信息、潜在分支、细节剧情线索、地图信息等信息。
+        总结下面的摘要形成一段简明扼要的摘要总结，着重详细记录重要信息(含可能重要的人物、地图、剧情细节或潜在分支、线索等)
         次要信息可简略提及或酌情丢弃。
         总结一般不超过350字，最坏不超过600字。有前后冲突的，以后为准覆盖。
         
@@ -195,7 +191,7 @@ class PromptManager:
     def get_initial_prompt(self, player_name: str, st_story: str = '', custom_prompt: str = "", inventory_text: str = "", attribute_text: str = ""):
         """获取初始提示词"""
         initial_context = f"""
-        玩家名为{player_name},从{st_story if st_story else '随机一个良好稳定的'}开篇故事开始游戏。
+        玩家名为{player_name},从[{st_story if st_story else '地点、危险度、环境、NPC、身份、物品等完全随机'}]的开篇故事开始游戏。
         第一人称限知视角.
         注意：
         如果需要设置初始变量或者添加初始物品，那么要用指令实现！
@@ -231,34 +227,34 @@ class PromptManager:
         历史: {previous_description}
         场景：{cur_desc}
         {situation_text}
-        {player_name}的动作:[{player_choice}]，
+        {player_name}的动作/话/指令是[{player_choice}]，
         {"执行动作后：" if choice_preview else ""}{choice_preview}
         {inventory_text+'\n(物品名包括符号)\n'}
         {attribute_text}
         {vars_text}
         注意：
         剧情用第一人称限知视角。
-        {'剧情需要结合玩家思考内容进行走向调整。' if '[思考:' in cur_desc else ''}
-        玩家行动不一定成功，避免过于平淡。
-        玩家希望自由探索，但你可以偶尔提供非强制性的事件引子。
+        金钱一般视为变量而不是物品；
+        玩家行动可能导致游戏结束，根据剧情判断是否结束。
+        鼓励剧情引入新内容，适度增加信息密度，丰富剧情。避免一直做同一件事。
+        {'剧情需结合思考内容进行走向调整。' if '[思考:' in cur_desc else ''}
+        玩家希望自由探索，但可以偶尔出现非强制性的事件引子。
         玩家若忽略事件，则不被卷入事件，且事件会自行发展直到结束。
-        尊重玩家体验悠闲生活；
         不出现不情愿的躲藏、逃跑、被追杀、被监视等被动情节.
         场景深度、大小有限，鼓励转换场景，避免长时间在同一地点探索。
         机遇、奖励等不反复出现，不出现持续深入获得更多奖励的情况。
-        剧情可以走向劣势甚至导致玩家死亡。
         {'''根据剧情与逻辑合理地给出1-5个选项，对应不同分支(可含退出剧情的)，选项类型和难度不同。
         选项中预期触发的指令，禁止写在当前剧情的commands中''' if not self.is_no_options else ""}
         
         实时进行：
-        用指令根据剧情符合逻辑地变动物品、变量、形势值、属性。
+        用指令根据剧情符合逻辑地变动物品、变量、形势、属性。
         用变量存储和更新需持久化的通用数据(如金钱、某NPC属性、好感度)，只存储数值型数据，不存储剧情信息.
         更新变量，保证变量实时跟随剧情，控制变量数量不太多。
         确保变量名严格匹配，禁止出现多个相似变量。
         移除旧或者无用的物品与变量，避免滥用或冗余。
         更改形势值。
         
-        直接给出从玩家动作文本开始过渡的新剧情，不要重复任何当前描述的内容。
+        直接给出严格从玩家动作或话(话原封不动保留)开始的新剧情，不要重复任何当前描述的内容。
 
         """
         full_prompt = f"""

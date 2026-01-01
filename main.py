@@ -17,8 +17,10 @@ from libs.practical_funcs import (clear_screen,
                                   COLOR_RESET,
                                   COLOR_RED,
                                   COLOR_YELLOW,
+                                  COLOR_MAGENTA,
                                   generate_game_id,
                                   find_file_by_name,
+                                  text_colorize,
                                   )
 from libs.animes import display_narrative_with_typewriter, SyncLoadingAnimation
 from game_engine import GameEngine
@@ -140,6 +142,7 @@ def save_game(game_engine, extra_datas: ExtraData, save_name="autosave", is_manu
             "item_repo": game_engine.item_system.item_repository,
             "is_no_options": game_engine.prompt_manager.is_no_options,
             "variables": game_engine.variables,
+            "conclude_cooldown": game_engine.conclude_summary_cooldown,
         }
 
         # 生成文件名
@@ -263,6 +266,7 @@ def load_game(game_engine, extra_datas: ExtraData, save_name="autosave", filenam
         game_engine.item_system.item_repository = save_data["item_repo"]
         game_engine.prompt_manager.is_no_options = save_data["is_no_options"]
         game_engine.variables = save_data["variables"]
+        game_engine.conclude_summary_cooldown = save_data["conclude_cooldown"]
 
         # 恢复配置
         config_data = save_data["custom_config"]
@@ -428,14 +432,13 @@ def display_options(game: GameEngine):
     显示游戏选项
     """
     if game.prompt_manager.is_no_options:
-        print("输入help 查看帮助")
         print('-'*30)
         return
-    has_danger, has_event, has_goods = False, False, False
+    has_impossible, has_danger, has_event, has_goods = False, False, False, False
     options, chara_attrs, situation = game.current_options, game.character_attributes, game.situation
     print("\n" + "你准备：")
     for opt in options:
-        print(f"{opt['id']}. {opt['text']}", end="")
+        print(f"{opt['id']}. {text_colorize(opt['text'])}", end="")
         fix_value = (chara_attrs.get(
             opt["main_factor"], 0)-opt["difficulty"])*3/2000
         # 处理形势
@@ -447,7 +450,7 @@ def display_options(game: GameEngine):
             # 根据几率来添加不同提示
             if opt["probability"] < 0.1-fix_value:
                 print(f"[{COLOR_RED}✘{COLOR_RESET}]")
-                has_danger = True
+                has_impossible = True
             elif opt["probability"] < 0.3-fix_value:
                 print(f"[{COLOR_RED}!{COLOR_RESET}]")
                 has_danger = True
@@ -466,15 +469,38 @@ def display_options(game: GameEngine):
                     f"{COLOR_RED}[✘ {opt['main_factor']}≥{opt['difficulty']}]{COLOR_RESET}")
         else:
             print()
-
+    if has_impossible:
+        print(f"[{COLOR_RED}✘]极难检定{COLOR_RESET}")
     if has_danger:
-        print(f"[{COLOR_RED}✘ !{COLOR_RESET}] {COLOR_RED}困难检定{COLOR_RESET}")
+        print(f"{COLOR_MAGENTA}[!]困难检定{COLOR_RESET}")
     if has_event:
-        print(f"[{COLOR_YELLOW}?{COLOR_RESET}] {COLOR_YELLOW}中等检定{COLOR_RESET}")
+        print(f"{COLOR_YELLOW}[?]中等检定{COLOR_RESET}")
     if has_goods:
-        print(f"[{COLOR_GREEN}▲{COLOR_RESET}] {COLOR_GREEN}简单检定{COLOR_RESET}")
+        print(f"{COLOR_GREEN}[▲]简单检定{COLOR_RESET}")
     print("输入help 查看帮助")
     print('-'*30)
+
+
+# 自定义行动的处理(必须件)
+def custom_action_func(game: GameEngine, extra_datas: ExtraData, skip_inputs: Tuple = ('help',)):
+    """
+    自定义行动
+    """
+    custom_action = input(
+        f"输入 /指令 以使用指令,如/help\n {COLOR_YELLOW}你决定{COLOR_RESET} \n::")
+    if custom_action in skip_inputs:
+        input(f"{COLOR_RED}提示：为了避免误输入，建议使用 /+指令 来进行指令{COLOR_RESET}\n指令将继续执行，按任意键继续")
+        return custom_action
+    if custom_action.startswith('/'):
+        cmd_input = custom_action[1:]
+        if cmd_input in skip_inputs:
+            return cmd_input
+        else:
+            print("无效指令")
+    else:
+        if custom_action.strip() == "" or game.go_game(custom_action, is_custom=True, is_skip_csmode_action_modify=extra_datas.skip_csmode_action_modify) == -1:
+            print("自定义行动无效/取消")
+    return custom_action
 
 
 # 获取用户输入并执行游戏操作(必须件)
@@ -483,22 +509,19 @@ def get_user_input_and_go(game: GameEngine, extra_datas: ExtraData, skip_inputs:
     获取用户输入并执行游戏操作
     """
     while True:
+        if game.prompt_manager.is_no_options:
+            custom_action = custom_action_func(game, extra_datas, skip_inputs)
+            if custom_action:
+                return custom_action
+            else:
+                continue
         anime_loader.stop_animation()
         user_input = input(":: ")
         if user_input in skip_inputs:
             return user_input
         if user_input.isdigit() and 1 <= int(user_input) <= len(game.current_options):
             display_narrative_with_typewriter(
-                game.current_options[int(user_input)-1]['next_preview'])
-        if user_input == "custom" or game.prompt_manager.is_no_options:
-            custom_action = input(
-                "你决定 (输入空内容以取消,输入0/a/m以使用刚输入的内容行动)\n::")
-            if custom_action in ('0', 'a', 'm'):
-                custom_action = user_input
-            if custom_action.strip() == "" or game.go_game(custom_action, is_custom=True, is_skip_csmode_action_modify=extra_datas.skip_csmode_action_modify) == -1:
-                print("自定义行动无效/取消")
-                continue
-            return custom_action
+                text_colorize(game.current_options[int(user_input)-1]['next_preview']))
         if not user_input.isdigit() or game.go_game(user_input) == -1:
             print("无效的选项ID，请重新输入。")
             continue
@@ -508,12 +531,20 @@ def get_user_input_and_go(game: GameEngine, extra_datas: ExtraData, skip_inputs:
 # 打印游戏历史记录(集成到主循环中)
 def print_all_history(game: GameEngine, back_range: int = 50):
     """
-    打印游戏历史记录
+    打印游戏历史记录（排除当前局，仅显示历史局；超过back_range时取最后back_range条历史）
     """
-    for turn, desc, choice in zip(range(1, len(game.history_descriptions[-back_range:])+1), game.history_descriptions[-back_range:], game.history_choices[-back_range:]):
-        print(f"{turn}:")
+    total_turns = len(game.history_descriptions)
+    history_descs = game.history_descriptions[:-1] if total_turns > 0 else []
+    history_choices = game.history_choices
+    recent_descs = history_descs[-back_range:] if history_descs else []
+    recent_choices = history_choices[-back_range:] if history_choices else []
+    start_turn = len(history_descs) - len(recent_descs) + \
+        1 if history_descs else 0
+    for idx, (desc, choice) in enumerate(zip(recent_descs, recent_choices)):
+        real_turn = start_turn + idx
+        print(f"{real_turn}:")
         print(desc)
-        print("我选择:", choice)
+        print(f"{COLOR_YELLOW}我选择:{COLOR_RESET}", choice)
         print("\n" + '-'*40)
 
 
@@ -648,6 +679,7 @@ def new_game(no_auto_load=False):
     主游戏逻辑
     """
     commands = (
+        "help",
         "save",
         "load",
         "new",
@@ -728,15 +760,14 @@ def new_game(no_auto_load=False):
             min(game_instance.character_attributes["INT"]//8, 4), -1)) + 1
 
     while game_instance.current_game_status == "ongoing":
-
         clear_screen()
         print_all_history(game_instance)
         if not no_repeat_sign:
             display_narrative_with_typewriter(
-                game_instance.current_description)
+                text_colorize(game_instance.current_description))
             no_repeat_sign = True
         else:
-            print(game_instance.current_description)
+            print(text_colorize(game_instance.current_description))
         print(game_instance.get_situation_text())
         game_instance.print_all_messages_await()
         show_item_var_caution(game_instance)

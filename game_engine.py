@@ -13,8 +13,7 @@ from typing import Optional
 import openai
 from json_repair import repair_json
 from config import CustomConfig
-from libs.practical_funcs import (text_colorize,
-                                  COLOR_CYAN,
+from libs.practical_funcs import (COLOR_CYAN,
                                   COLOR_RESET,
                                   COLOR_RED,
                                   COLOR_GREEN,
@@ -276,17 +275,6 @@ class GameEngine:
                         option["difficulty"] = 0
                     if not option.get("main_factor"):
                         option["main_factor"] = "LUK"
-
-            # 美化描述
-            self.current_description = text_colorize(
-                self.current_description)
-            for option in self.current_options:
-                if option["next_preview"]:
-                    option["next_preview"] = text_colorize(
-                        option["next_preview"])
-                # 对选项文本也美化
-                option["text"] = text_colorize(option["text"])
-
             return json_response
         except (ValueError, json.JSONDecodeError) as e:
             self.anime_loader.stop_animation()
@@ -711,7 +699,7 @@ class GameEngine:
         """获取当前变量的文本描述"""
         if not self.variables:
             return "当前没有变量"
-        text = "游戏变量表：\n"
+        text = "游戏变量表(变量名:值)：\n"
         for var_name, var_value in self.variables.items():
             text += f"{var_name}:{var_value}\n"
         return text
