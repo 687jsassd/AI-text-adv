@@ -659,6 +659,12 @@ def get_user_input_and_go(game: GameEngine, extra_datas: ExtraData, skip_inputs:
                 continue
         game.anime_loader.stop_animation()
         user_input = input(":: ")
+        if user_input == "custom":
+            custom_action = custom_action_func(game, extra_datas, skip_inputs)
+            if custom_action:
+                return custom_action
+            else:
+                continue
         if user_input in skip_inputs:
             return user_input
         if user_input.isdigit() and 1 <= int(user_input) <= len(game.current_options):
