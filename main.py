@@ -918,7 +918,7 @@ def new_game(no_auto_load=False):
             no_repeat_sign = True
         else:
             print(text_colorize(game_instance.current_description))
-        print(game_instance.situation_system.get_situation_text())
+        print(game_instance.situation_system.get_situation_text(colorize=True))
         game_instance.print_all_messages_await()
         show_item_var_caution(game_instance)
         display_options(game_instance)
