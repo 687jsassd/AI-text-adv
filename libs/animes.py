@@ -9,6 +9,11 @@ import threading
 import time
 from datetime import datetime
 import sys
+from logging import getLogger
+from libs.practical_funcs import TO_ANSI_COLORS, replace_color_code
+from libs.animes_rich import console
+
+logger = getLogger(__name__)
 
 
 class SyncLoadingAnimation:
@@ -321,6 +326,14 @@ def typewriter_narrative(text: str,
     """
     if prefix:
         print(prefix)
+    if color and color in TO_ANSI_COLORS:
+        color = TO_ANSI_COLORS[color]
+    if not color.startswith("\033[") or not reset_color.startswith("\033["):
+        logger.warning(
+            "[打字机动画]颜色代码 %s 或 %s 不是ANSI颜色代码，已重置为默认值",
+            color, reset_color)
+        color = ""
+        reset_color = ""
 
     # 添加颜色
     colored_text = f"{color}{text}{reset_color}" if color else text
@@ -328,7 +341,7 @@ def typewriter_narrative(text: str,
     # 使用打字机效果
     interrupted = typewriter_effect(
         colored_text,
-        delay=delay,  # 稍快的速度
+        delay=delay,
         newline_delay=0.05,
     )
 
@@ -352,7 +365,8 @@ def display_narrative_with_typewriter(narr: str,
     Returns:
         bool: 是否被用户中断
     """
-    print("\n" + separator)
+    # 替换文本中的颜色代码为ANSI的
+    narr = replace_color_code(narr)
 
     paras = narr.split("\n")
     interrupted = False  # 这里关闭中断功能
@@ -361,7 +375,7 @@ def display_narrative_with_typewriter(narr: str,
         if para.strip() and not interrupted:
             para_interrupted = typewriter_narrative(
                 para.strip(),
-                color=color,
+                color=TO_ANSI_COLORS.get(color, color),
                 suffix="\n"
             )
             if para_interrupted:
@@ -399,6 +413,12 @@ def probability_check_animation(success_prob: float,
         color_preset: 配色方案编号(1: 成功蓝色，失败黄色；2: 成功绿色，失败红色)
     """
     # 配色方案预设
+    for i in [color_threshold, color_success, color_fail, color_bar]:
+        if i in TO_ANSI_COLORS:
+            i = TO_ANSI_COLORS[i]
+    if not all(color.startswith('\033[') or color.startswith('\x1b[') for color in [color_threshold, color_success, color_fail, color_bar]):
+        raise ValueError(
+            f"颜色代码必须以'\033['开头,这个动画不支持rich的颜色代码 |你的代码:{[i for i in [color_threshold, color_success, color_fail, color_bar] if not i.startswith('\033[') and not i.startswith('\x1b[')]}")
     if color_preset == 1:  # 成功蓝色，失败黄色
         color_success = "\033[94m"  # 蓝色
         color_fail = "\033[93m"  # 黄色
@@ -516,20 +536,20 @@ def probability_check_animation(success_prob: float,
 
 
 if __name__ == "__main__":
-    print("各类动画测试")
-    anime_loader = SyncLoadingAnimation()
-    anime_loader.start_animation("spinner")
-    time.sleep(2)
-    anime_loader.stop_animation()
-    anime_loader.start_animation("progress")
-    time.sleep(2)
-    anime_loader.stop_animation()
-    anime_loader.start_animation("dots")
-    time.sleep(2)
-    anime_loader.stop_animation()
-    anime_loader.start_animation("typewriter")
-    time.sleep(2)
-    anime_loader.stop_animation()
+    # print("各类动画测试")
+    # anime_loader = SyncLoadingAnimation()
+    # anime_loader.start_animation("spinner")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+    # anime_loader.start_animation("progress")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+    # anime_loader.start_animation("dots")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+    # anime_loader.start_animation("typewriter")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
 
     print("检定动画测试")
     print("测试1：实际值0.48/0.51，目标值0.5")

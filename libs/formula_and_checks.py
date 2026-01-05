@@ -7,7 +7,7 @@
 
 import random
 from libs.animes import probability_check_animation
-from libs.practical_funcs import COLOR_MAGENTA, COLOR_RESET
+from libs.animes_rich import console
 
 
 class GameFormulas:
@@ -67,7 +67,9 @@ class GameChecks:
             if allow_base_first_success:
                 first_target = max(first_target, 0.01)
             rand_first = random.uniform(0, 1)
-            print("正在进行第一次检定")
+            console.rule(
+                "第一次检定 - [bold blue]大成功[/bold blue]/[bold yellow]第二次机会[/bold yellow]",
+                style="bold green")
             probability_check_animation(
                 rand_first,
                 target_prob=first_target,
@@ -84,7 +86,9 @@ class GameChecks:
             if allow_base_first_success:
                 second_target = max(second_target, 0.01)
             rand_second = random.uniform(0, 1)
-            print("正在进行第二次检定")
+            console.rule(
+                "第二次检定 - [bold green]小成功[/bold green]/[bold red]失败[/bold red]",
+                style="bold red")
             probability_check_animation(
                 rand_second,
                 target_prob=second_target,
@@ -129,7 +133,9 @@ class GameChecks:
 
         enable_final_chance_prob = random.uniform(0, 1)
         if enable_final_chance_prob < final_chance_prob:
-            print(COLOR_MAGENTA+"最后机会"+COLOR_RESET)
+            console.rule(
+                "[bold magenta]最后机会[/bold magenta]",
+                style="bold purple")
             final_chance_rand = random.uniform(0, 1)
             probability_check_animation(
                 final_chance_rand,

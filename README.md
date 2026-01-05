@@ -93,7 +93,7 @@
 
 ### 环境要求
 - Python 3.7+
-- 依赖包：`openai`, `json_repair`
+- 依赖包：`openai`, `json_repair` `rich`, `keyboard`       
 
 ### 安装步骤
 
@@ -105,7 +105,7 @@ cd AI-game-test
 
 2. **安装依赖**
 ```bash
-pip install openai json_repair
+pip install openai json_repair rich keyboard
 ```
 
 3. **配置API**
@@ -212,6 +212,7 @@ AI-game-test/
 ├── game_engine.py               # 游戏引擎核心逻辑
 ├── config.py                    # 配置管理系统
 ├── libs/                        # 核心模块库（EXP-v0.1.7重构）
+│   ├── animes_rich.py               # 使用rich库的动画效果库
 │   ├── animes.py               # 动画效果工具
 │   ├── prompt_manager.py       # 提示词管理
 │   ├── event_manager.py        # 事件管理系统

@@ -5,7 +5,9 @@
 # Copyright (c) 2025 [687jsassd]
 # MIT License
 
+from rich import print
 from libs.practical_funcs import COLOR_YELLOW, COLOR_RESET, COLOR_RED, clear_screen
+from libs.animes_rich import console
 
 
 class ItemInventory:
@@ -21,7 +23,7 @@ class ItemInventory:
         """获取物品仓库的文本描述"""
         if not self.item_repository:
             return "物品仓库当前没有道具"
-        return f"物品仓库当前道具列表（{len(self.item_repository)}）：\n"+"\n".join([f"{idx+1}.{COLOR_YELLOW}{item}{COLOR_RESET}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(self.item_repository.items())])
+        return f"物品仓库当前道具列表（{len(self.item_repository)}）：\n"+"\n".join([f"{idx+1}.{item}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(self.item_repository.items())])
 
     def get_inventory_text(self, need_desc=True):
         """获取当前道具列表的文本描述"""
@@ -33,16 +35,16 @@ class ItemInventory:
             self.inventory) <= 50 else list(self.inventory.items())[-50:]
         no_available_items = list(self.inventory.items())[:-50] if len(
             self.inventory) > 50 else []
-        return f"当前道具列表（{nums_text}）：\n" + "\n".join([f"{idx+1}.{COLOR_YELLOW}{item}{COLOR_RESET}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(available_items)] + [f"{idx+len(available_items)+1}.{COLOR_RED}[✘]{item}{COLOR_RESET}: {desc}" for idx, (item, desc) in enumerate(no_available_items)])
+        return f"当前道具列表({nums_text}):\n" + "\n".join([f"{idx+1}.{item}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(available_items)] + [f"{idx+len(available_items)+1}.{COLOR_RED}[✘]{item}{COLOR_RESET}: {desc}" for idx, (item, desc) in enumerate(no_available_items)])
 
     def get_inventory_text_for_prompt(self):
         """获取当前道具列表的文本描述，更简洁"""
         if not self.inventory:
             return "玩家当前没有道具"
         if len(self.inventory) <= 12:
-            return "当前道具列表：\n" + "\n".join([f"{COLOR_YELLOW}{item}{COLOR_RESET}(描述:{desc})" for item, desc in self.inventory.items()])
+            return "当前道具列表：\n" + "\n".join(['{'+f"{item}:{desc}"+'}' for item, desc in self.inventory.items()])
         else:
-            return "当前持有道具：\n" + "\n".join([f"{item}(描述:{desc})" for item, desc in self.inventory.items()][-25:]) + f"\n以及过去的道具:{', '.join([item for item, desc in self.inventory.items()][-35:-12])}"
+            return "当前持有道具：\n" + "\n".join(['{'+f"{item}:{desc}"+'}' for item, desc in self.inventory.items()][-25:]) + f"\n以及过去的道具:{', '.join([item for item, desc in self.inventory.items()][-35:-12])}"
 
     def fix_item_name_error(self):
         """
@@ -113,12 +115,16 @@ class ItemInventory:
         show_desc = True
         while True:
             clear_screen()
+            console.rule(
+                "物品操作",
+                style="bold green")
             print("当前物品:" + self.get_inventory_text(show_desc))
+            console.rule(style="bold green")
             print("\n仓库物品:" + self.get_item_repository_text(show_desc))
-            print("\n物品操作指令")
+            console.rule("物品操作指令", style="bold green")
             print(
-                "输入 '*use 被操作的物品名(或id) 进行什么操作 对哪个目标' 以操作物品(会推进剧情) 例如:'*use 石子 投掷 梅超风'表示对梅超风投掷石子 ")
-            print("'*remove 物品名(或id)' 以销毁物品;输入多个空格分隔的id以批量操作")
+                "'*use 要操作的物品名(或id) 进行的操作 使用目标' 以操作物品(会推进剧情)")
+            print("'*remove 物品名(或id)'以销毁物品;输入多个空格分隔的id以批量操作")
             print("'*put 物品名(或id)' 以存储物品  (只有最后50个物品会参与剧情);输入多个空格分隔的id以批量操作")
             print("'*get 物品名(或id)' 以从存储获得物品;输入多个空格分隔的id以批量操作")
             print("'*add 物品名 物品描述' 以添加物品")
@@ -128,7 +134,7 @@ class ItemInventory:
             print("'**getall' 获得所有仓库中物品")
             print("'*desc 物品名(或id)' 以查看该物品描述")
             print("'*showdesc' 以切换是否显示描述")
-            print("exit. 退出物品操作")
+            print("[red] exit. 退出物品操作 [/red]")
             user_input = input("输入操作:\n::")
             if user_input == "exit":
                 return False, ('', '', '')

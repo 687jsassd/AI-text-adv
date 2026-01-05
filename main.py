@@ -12,8 +12,10 @@ import gzip
 import sys
 import logging
 from collections import deque
+from rich import print
 from config import (LOG_DIR,
                     CustomConfig)
+from libs.animes_rich import GameTitle, console
 from libs.event_manager import CommandManager
 from libs.logger import init_global_logger, log_exceptions
 from libs.practical_funcs import (clear_screen,
@@ -23,6 +25,7 @@ from libs.practical_funcs import (clear_screen,
                                   COLOR_YELLOW,
                                   COLOR_MAGENTA,
                                   generate_game_id,
+
                                   find_file_by_name,
                                   text_colorize,
                                   )
@@ -574,7 +577,7 @@ def display_options(game: GameEngine):
     显示游戏选项
     """
     if game.prompt_manager.is_no_options:
-        print('-'*30)
+        console.rule(style="bold blue")
         return
     has_impossible, has_danger, has_event, has_goods = False, False, False, False
     options, chara_attrs, situation = game.current_options, game.attr_system.attributes, game.situation_system.situation
@@ -620,7 +623,7 @@ def display_options(game: GameEngine):
     if has_goods:
         print(f"{COLOR_GREEN}[▲]简单检定{COLOR_RESET}")
     print("输入help 查看帮助")
-    print('-'*30)
+    console.rule(style="bold blue")
 
 
 # 自定义行动的处理(必须件)
@@ -693,7 +696,7 @@ def print_all_history(game: GameEngine, back_range: int = 50):
         print(f"{real_turn}:")
         print(text_colorize(desc))
         print(f"{COLOR_YELLOW}我选择:{COLOR_RESET}", text_colorize(choice))
-        print("\n" + '-'*40)
+        console.rule(style="white")
 
 
 # 显示物品/变量数警告(已集成到主循环中)
@@ -957,7 +960,7 @@ def new_game(no_auto_load=False):
             continue
         elif user_input == "summary":
             clear_screen()
-            print("摘要")
+            print("<剧情摘要>")
             print("\n".join(
                 [f"{i+1}. {it}" for i, it in enumerate(list(game_instance.history_simple_summaries))]))
             input("按任意键继续...")
@@ -1070,9 +1073,10 @@ def new_game(no_auto_load=False):
             print(f"{COLOR_RED}fix_item_name{COLOR_RESET}:修复道具名中的错误")
             print(
                 f"{COLOR_RED}show_init_resp{COLOR_RESET}:切换显示对每轮剧情的AI的原始相应与Token信息(debug)")
-            print('-'*20)
+            console.rule(style="white")
             input("按任意键继续...")
             continue
+
         else:
             extra_datas.turns += 1
             init_turn_datas()
@@ -1089,6 +1093,9 @@ def main():
     """
     主函数，游戏入口
     """
+    game_title = GameTitle()
+    game_title.show()
+
     no_auto_load = False
     while True:
         i = new_game(no_auto_load)

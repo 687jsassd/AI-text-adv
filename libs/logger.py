@@ -31,7 +31,7 @@ def init_global_logger():
 
     # 3. 全局日志器（root logger）
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.ERROR)  # 开发环境用DEBUG，生产环境改ERROR
+    root_logger.setLevel(logging.WARNING)  # 开发环境用DEBUG，生产环境改ERROR
 
     # 4. 控制台输出（开发环境用，生产环境可注释）
     # console_handler = logging.StreamHandler(sys.stdout)
@@ -48,7 +48,7 @@ def init_global_logger():
         backupCount=5,
         encoding='utf-8'
     )
-    file_handler.setLevel(logging.ERROR)  # 只记录ERROR及以上（异常、严重错误）
+    file_handler.setLevel(logging.WARNING)
     file_handler.setFormatter(log_format)
     root_logger.addHandler(file_handler)
 

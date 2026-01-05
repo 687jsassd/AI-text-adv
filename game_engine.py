@@ -13,6 +13,7 @@ from math import atan
 from collections import deque
 from typing import Optional
 import openai
+from rich import print
 from json_repair import repair_json
 from config import CustomConfig, CURRENT_TIME
 from libs.practical_funcs import (COLOR_RESET,
@@ -26,6 +27,7 @@ from libs.extra_attributes import Attributes
 from libs.extra_situation import Situation
 from libs.formula_and_checks import GameFormulas, GameChecks
 from libs.logger import log_exceptions
+
 
 logger = logging.getLogger(__name__)
 
@@ -299,15 +301,7 @@ class GameEngine:
                             0], list(item_info.values())[0]
                     else:
                         logger.warning("指令值格式错误(不是字典): %s", item_info)
-                        item_name, item_desc = item_info, '无描述'
-                        # 对错误地将字典转换为字符串而作为物品名的物品进行修复
-                        if item_name.startswith('{') and item_name.endswith('}'):
-                            item_name = item_name[1:-1]
-                            # 以:进行分割，获取道具名和道具描述
-                            item_name, item_desc = item_name.split(':')
-                            # 去除首尾可能的引号
-                            item_name = item_name.strip('"').strip("'")
-                            item_desc = item_desc.strip('"').strip("'")
+                        return
                     # 调用修复函数，继续深层修复
                     self.item_system.fix_item_name_error()
                     # 如果已经有这个道具就不添加
@@ -362,7 +356,7 @@ class GameEngine:
                 else:
                     logger.warning("改变属性时未提供属性信息: %s", command)
             elif command_type == "change_situation":
-                if value:
+                if value is not None:
                     if isinstance(value, str) and ((value.startswith(("+", "-")) and value[1:].isdigit()) or value.isdigit()):
                         logger.warning("形势值不是整数,但可以转换: %s", command)
                         value = int(value)
@@ -385,7 +379,7 @@ class GameEngine:
                 self.anime_loader.stop_animation()
                 break
             elif command_type == "set_var":
-                if value:
+                if value is not None:
                     logger.debug("设置变量时提供的信息: %s", value)
                     if not isinstance(value, dict):
                         logger.warning("设置变量时提供的信息格式错误: %s", command)

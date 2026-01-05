@@ -8,6 +8,9 @@ import os
 import sys
 import json
 from datetime import datetime
+from rich import print
+from libs.animes_rich import console
+
 
 if getattr(sys, 'frozen', False):
     # 打包后：exe所在目录（处理符号链接/中文路径）
@@ -247,7 +250,9 @@ class CustomConfig:
         while not is_exit:
             try:
                 os.system('cls' if os.name == 'nt' else 'clear')
-                print("输入你想要配置的参数:")
+                console.rule(
+                    "[bold magenta]配置游戏参数[/bold magenta]",
+                    style="bold magenta")
                 print("0.查看帮助或建议")
                 print(f"1.最大输出Token [{self.max_tokens}]")
                 print(f"2.温度 [{self.temperature}]")
@@ -266,8 +271,8 @@ class CustomConfig:
                 print(f"12.API提供商 [{current_provider.get('name', '未配置')}]")
                 print(f"   - 模型: {current_provider.get('model', '')}")
                 print(f"   - api地址: {current_provider.get('base_url', '')}")
-                print("* 表示如果在游戏中修改，则需要重启游戏生效")
-                print("\033[93m exit. 退出配置(完成配置) \033[0m")
+                print("[bright yellow]* 表示如果在游戏中修改，则需要重启游戏生效[/bright yellow]")
+                print("[red] exit. 退出配置(完成配置) [/red]")
 
                 while True:
                     choice = input("输入你想要配置的参数ID：")

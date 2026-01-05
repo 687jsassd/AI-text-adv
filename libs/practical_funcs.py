@@ -10,13 +10,23 @@ import os
 
 
 # 颜色常量
-COLOR_RED = "\033[91m"
-COLOR_GREEN = "\033[92m"
-COLOR_YELLOW = "\033[93m"
-COLOR_BLUE = "\033[94m"
-COLOR_MAGENTA = "\033[95m"
-COLOR_CYAN = "\033[96m"
-COLOR_RESET = "\033[0m"
+COLOR_RED = "[bold red]"  # \033[91m
+COLOR_GREEN = "[bold green]"  # \033[92m
+COLOR_YELLOW = "[bold yellow]"  # \033[93m
+COLOR_BLUE = "[bold blue]"  # \033[94m
+COLOR_MAGENTA = "[bold magenta]"  # \033[95m
+COLOR_CYAN = "[bold cyan]"  # \033[96m
+COLOR_RESET = "[white]"  # \033[0m
+
+TO_ANSI_COLORS = {
+    '[bold red]': "\033[91m",
+    '[bold green]': "\033[92m",
+    '[bold yellow]': "\033[93m",
+    '[bold blue]': "\033[94m",
+    '[bold magenta]': "\033[95m",
+    '[bold cyan]': "\033[96m",
+    '[white]': "\033[0m",
+}
 
 
 # 清空控制台屏幕
@@ -34,7 +44,7 @@ def text_colorize(text: str):
     """
     rcs = [COLOR_RESET]  # remain_color_stack
     rnccs = []  # remain_need_close_chars_stack
-    finally_text = []  # 用于避免频繁创建字符串
+    finally_text = [COLOR_RESET]  # 预放RESET以统一颜色
     current_printing_color = COLOR_RESET
     color_convert_dict = {
         "<": COLOR_MAGENTA,
@@ -96,3 +106,13 @@ def find_file_by_name(direc, filename):
             if os.path.exists(filepath):
                 return filepath
     return None
+
+
+# 替换文本中的颜色代码为ANSI的
+def replace_color_code(text: str):
+    """
+    替换文本中的颜色代码为ANSI的
+    """
+    for color, to_ansi in TO_ANSI_COLORS.items():
+        text = text.replace(color, to_ansi)
+    return text
