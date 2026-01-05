@@ -11,7 +11,6 @@ from datetime import datetime
 import sys
 from logging import getLogger
 from libs.practical_funcs import TO_ANSI_COLORS, replace_color_code
-from libs.animes_rich import console
 
 logger = getLogger(__name__)
 

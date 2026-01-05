@@ -6,7 +6,7 @@
 # MIT License
 
 from rich import print
-from libs.practical_funcs import COLOR_YELLOW, COLOR_RESET, COLOR_RED, clear_screen
+from libs.practical_funcs import COLOR_RESET, COLOR_RED, clear_screen
 from libs.animes_rich import console
 
 
