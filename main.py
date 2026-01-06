@@ -453,9 +453,8 @@ def find_latest_save(save_dir, save_name="autosave", include_manual=False):
         logger.warning("未找到有效存档")
         return None
 
+
 # 列出所有保存文件
-
-
 @log_exceptions(logger)
 def list_saves():
     """
@@ -534,29 +533,106 @@ def manual_save(game_engine, extra_datas: ExtraData):
 # 手动加载函数（供用户调用）
 def manual_load(game_engine, extra_datas: ExtraData):
     """
-    手动加载游戏，显示保存列表供用户选择
+    手动加载游戏，分两级选择：
+    1. 先选择游戏ID（其他游戏ID优先，当前游戏ID在最后）
+    2. 再选择该游戏ID下的具体存档
     """
-    saves = list_saves()
-    if not saves:
+    # 获取所有存档数据
+    all_saves = list_saves()
+    if not all_saves:
         print("没有找到保存文件")
         return False, extra_datas
 
-    print("\n可用的保存文件 (按游戏ID分类):")
-    for i, save in enumerate(saves, 1):
-        save_type = "手动" if save['save_type'] == 'manual' else "自动"
-        print(
-            f"{i}.{save['game_id']}{'-'+save['save_desc']if save['save_desc'] != 'autosave' else ''}-{save['player_name']}-回合{save['total_turns']}-{save_type}{'-'+COLOR_YELLOW+"不匹配的游戏版本"+save['ver']+COLOR_RESET if save['ver'] != VERSION else ''}")
+    current_game_id = getattr(game_engine, "game_id", None)
+    if not current_game_id:
+        print("无法获取当前游戏ID，将显示所有存档")
+        current_game_id = ""
 
+    # 分离当前游戏ID的存档和其他游戏ID的存档
+    current_saves = [s for s in all_saves if s["game_id"] == current_game_id]
+    other_saves = [s for s in all_saves if s["game_id"] != current_game_id]
+
+    # 提取其他游戏ID的唯一值并去重
+    other_game_ids = sorted(
+        list(set([s["game_id"] for s in other_saves])), reverse=False)
+
+    # 构建第一级选择菜单（游戏ID选择）
+    print("\n===== 选择游戏存档组 =====")
+    # 1. 显示其他游戏ID
+    for i, game_id in enumerate(other_game_ids, 1):
+        # 统计该ID下的存档数量
+        save_count = len([s for s in other_saves if s["game_id"] == game_id])
+        print(f"{i}. 游戏ID: {game_id} (存档数量: {save_count})")
+
+    # 2. 显示当前游戏ID选项（如果有当前ID且有存档）
+    current_option_idx = len(other_game_ids) + 1
+    if current_game_id and current_saves:
+        print(
+            f"{current_option_idx}. 当前游戏ID: {current_game_id} (存档数量: {len(current_saves)})")
+    elif current_game_id and not current_saves:
+        print(f"{current_option_idx}. 当前游戏ID: {current_game_id} (无存档)")
+
+    # 3. 取消选项
+    cancel_idx = len(other_game_ids) + (1 if current_game_id else 0) + 1
+    print(f"{cancel_idx}. 取消")
+
+    # 处理第一级选择（游戏ID选择）
     try:
-        choice = input("选择要加载的存档编号（输入0取消）: ")
-        if choice == "0":
+        first_choice = input(f"\n请选择存档组编号（1-{cancel_idx}）: ")
+        if first_choice == str(cancel_idx):  # 取消
             return False, extra_datas
 
-        choice_idx = int(choice) - 1
-        if 0 <= choice_idx < len(saves):
-            selected_save = saves[choice_idx]
+        first_choice_idx = int(first_choice)
+
+        # 校验选择范围
+        max_valid_idx = len(other_game_ids) + (1 if current_game_id else 0)
+        if first_choice_idx < 1 or first_choice_idx > max_valid_idx:
+            print("无效的选择编号")
+            return False, extra_datas
+
+        # 确定选中的游戏ID
+        selected_game_id = ""
+        if first_choice_idx <= len(other_game_ids):
+            # 选择了其他游戏ID
+            selected_game_id = other_game_ids[first_choice_idx - 1]
+        else:
+            # 选择了当前游戏ID
+            selected_game_id = current_game_id
+
+        # 筛选该游戏ID下的所有存档
+        target_saves = [
+            s for s in all_saves if s["game_id"] == selected_game_id]
+        if not target_saves:
+            print(f"游戏ID {selected_game_id} 下无可用存档")
+            return False, extra_datas
+
+        # 构建第二级选择菜单（具体存档选择）
+        print(f"\n===== 选择 {selected_game_id} 的具体存档 =====")
+        for i, save in enumerate(target_saves, 1):
+            save_type = "手动" if save['save_type'] == 'manual' else "自动"
+            version_warn = (
+                f"{COLOR_YELLOW}不匹配的游戏版本{save['ver']}{COLOR_RESET}"
+                if save['ver'] != VERSION else ""
+            )
+            save_desc = f"-{save['save_desc']}" if save['save_desc'] != 'autosave' else ""
+            print(
+                f"{i}. {save['game_id']}{save_desc}-{save['player_name']}-回合{save['total_turns']}-{save_type} {version_warn}"
+                f" (存档时间: {save['timestamp']})"
+            )
+
+        # 处理第二级选择（具体存档）
+        second_choice = input("\n选择要加载的存档编号（输入0取消）: ")
+        if second_choice == "0":
+            return False, extra_datas
+
+        second_choice_idx = int(second_choice) - 1
+        if 0 <= second_choice_idx < len(target_saves):
+            selected_save = target_saves[second_choice_idx]
             success, message = load_game(
-                game_engine, extra_datas, filename=selected_save["filename"], game_id=selected_save["game_id"])
+                game_engine, extra_datas,
+                filename=selected_save["filename"],
+                game_id=selected_save["game_id"]
+            )
             if success:
                 print(message)
                 return success, extra_datas
@@ -564,14 +640,21 @@ def manual_load(game_engine, extra_datas: ExtraData):
                 print(message)
                 return False, extra_datas
         else:
-            print("无效的选择")
+            print("无效的存档编号")
             return False, extra_datas
+
     except ValueError:
         print("请输入有效的数字")
         return False, extra_datas
-
+    except Exception as e:
+        print(f"加载存档过程中出错: {e}")
+        if logger:
+            logger.error("手动加载存档失败", exc_info=e)
+        return False, extra_datas
 
 # 显示游戏选项(必须件)
+
+
 def display_options(game: GameEngine):
     """
     显示游戏选项
@@ -906,10 +989,12 @@ def new_game(no_auto_load=False):
         if not game_instance.game_id:
             game_instance.game_id = generate_game_id()
     no_repeat_sign = False  # 运行指令后，原本的文字不再打字机效果输出
+    no_save_again_sign = False  # 运行查看类指令后，不再自动保存
 
     def init_turn_datas():
-        nonlocal no_repeat_sign
+        nonlocal no_repeat_sign, no_save_again_sign
         no_repeat_sign = False
+        no_save_again_sign = False
         extra_datas.think_count_remain = int(max(
             # 重置思考次数
             min(game_instance.attr_system.get_attr("INT")//8, 4), -1)) + 1
@@ -936,9 +1021,14 @@ def new_game(no_auto_load=False):
         if not game_instance.current_description.strip() or not game_instance.current_options:
             print("可能出现错误")
             print(game_instance.current_response)
-        game_instance.log_game(os.path.join(
-            LOG_DIR, game_instance.game_id+f"_t{extra_datas.turns}.log"))
-        save_game(game_instance, extra_datas)
+            input("按任意键继续...")
+            continue
+        if not no_save_again_sign:
+            game_instance.log_game(os.path.join(
+                LOG_DIR, game_instance.game_id+f"_t{extra_datas.turns}.log"))
+            save_game(game_instance, extra_datas)
+            no_save_again_sign = True
+
         user_input = get_user_input_and_go(
             game_instance, extra_datas, commands)
 
@@ -958,7 +1048,7 @@ def new_game(no_auto_load=False):
             if operate_item(game_instance):
                 init_turn_datas()
                 continue
-            input("按任意键继续...")
+            no_save_again_sign = False  # 确保即使进行了如更名之类的操作，也会保存
             continue
         elif user_input == "summary":
             clear_screen()
@@ -969,6 +1059,7 @@ def new_game(no_auto_load=False):
             continue
         elif user_input == "conclude_summary":
             game_instance.go_game("", False, True)
+            no_save_again_sign = False
             input("总结完成，按任意键继续...")
             continue
         elif user_input == "attr":
@@ -986,6 +1077,7 @@ def new_game(no_auto_load=False):
             name = input("请输入要设置的变量名：\n:: ")
             val = input("请输入要设置的变量值：\n:: ")
             game_instance.variables[name] = val
+            no_save_again_sign = False
             input("完成设置，按任意键继续...")
             continue
         elif user_input == "delvar":
@@ -996,6 +1088,7 @@ def new_game(no_auto_load=False):
                 input("变量不存在，按任意键继续...")
                 continue
             del game_instance.variables[name]
+            no_save_again_sign = False
             input("完成删除，按任意键继续...")
             continue
         elif user_input == "save":
@@ -1013,6 +1106,7 @@ def new_game(no_auto_load=False):
                 continue
         elif user_input == "config":
             game_instance.custom_config.config_game()
+            no_save_again_sign = False
             continue
         elif user_input == "new":
             return 'new_game'
@@ -1023,6 +1117,7 @@ def new_game(no_auto_load=False):
             continue
         elif user_input == "fix_item_name":
             game_instance.item_system.fix_item_name_error()
+            no_save_again_sign = False
             print("道具名修复完成")
             input("按任意键继续...")
             continue
@@ -1040,6 +1135,7 @@ def new_game(no_auto_load=False):
                 continue
             game_instance.think_go_game(content)
             extra_datas.think_count_remain -= 1
+            no_save_again_sign = False
             input("思考完成，按任意键继续...")
             continue
         elif user_input == "cs*f":
