@@ -177,7 +177,7 @@ def manage_auto_saves(game_save_dir, save_name="autosave"):
         print(f"自动存档管理失败: {e}")
 
 
-def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
+def load_game(game_engine, save_name="autosave", filename=None, game_id=None, loading_animation=None):
     """
     从文件加载游戏状态
     """
@@ -221,6 +221,8 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
 
         # 恢复游戏状态
         if save_data["version"] != VERSION:
+            if loading_animation:
+                loading_animation.stop_animation()
             tmp = input(
                 f"\n[警告]:不匹配的版本号(存档{save_data['version']} -- 游戏{VERSION})\n 强制读取？(y/n)")
             if tmp.lower() != "y":
@@ -855,7 +857,7 @@ def new_game(no_auto_load=False):
     anime_loader.start_animation("spinner", message="读取中")
     show_init_resp = False
     if not no_auto_load:
-        loadsuccess, _, message = load_game(GAME)
+        loadsuccess, _, message = load_game(GAME, loading_animation=anime_loader)
         print(message)
     else:
         loadsuccess = False
