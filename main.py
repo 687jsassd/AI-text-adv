@@ -1160,8 +1160,9 @@ def main():
     """
     主函数，游戏入口
     """
-    game_title = GameTitle()
-    game_title.show()
+    if sys.platform != "linux":
+        game_title = GameTitle()
+        game_title.show()
 
     no_auto_load = False
     while True:

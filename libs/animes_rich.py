@@ -45,7 +45,7 @@ class GameTitle:
 
     def check_keypress(self):
         """检查按键的线程函数"""
-        keyboard.wait("enter")
+        keyboard.read_event()
         self.exit_flag = True
 
     def show(self):
