@@ -55,9 +55,19 @@ class CommandManager:
         else:
             print("指令不存在")
 
+    @property
+    def cmds(self) -> tuple:
+        """
+        返回所有指令
+        """
+        return tuple(self._cmds.keys())
+
     def list_cmds(self):
         """
         列出所有指令
         """
         for cmd in self._cmds:
             print(f"{cmd}: {self._cmd_desc[cmd]}")
+
+
+cmd_manager = CommandManager()

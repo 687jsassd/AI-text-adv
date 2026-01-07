@@ -6,6 +6,7 @@
 # 游戏引擎
 import json
 import os
+import re
 import time
 import logging
 import gzip
@@ -235,9 +236,15 @@ class GameEngine:
                 logger.warning("未能解析描述??\n %s", json_response)
                 input(f"未能解析描述?? 按键重试 {json_response}\n")
                 return None
-            # 为每一句添加换行
+            # 添加换行
+            self.current_description = re.sub(
+                r"。(?!』)",  # 正则规则：匹配"。"，且其后紧跟的不是"』"
+                "。\n",       # 替换成：。+换行符
+                self.current_description
+            )
             self.current_description = self.current_description.replace(
-                "。", "。\n")
+                "』", "』\n")
+
             if self.current_description:
                 self.history_simple_summaries.append(
                     json_response.get("summary", ""))

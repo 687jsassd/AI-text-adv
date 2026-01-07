@@ -16,7 +16,7 @@ from rich import print
 from config import (LOG_DIR,
                     CustomConfig)
 from libs.animes_rich import GameTitle, console
-from libs.event_manager import CommandManager
+from libs.event_manager import cmd_manager
 from libs.logger import init_global_logger, log_exceptions
 from libs.practical_funcs import (clear_screen,
                                   COLOR_GREEN,
@@ -84,7 +84,6 @@ class ExtraData:
 
 
 config = CustomConfig()
-cmd_manager = CommandManager()  # TODO 事件化指令
 
 
 # 保存游戏
@@ -652,9 +651,8 @@ def manual_load(game_engine, extra_datas: ExtraData):
             logger.error("手动加载存档失败", exc_info=e)
         return False, extra_datas
 
+
 # 显示游戏选项(必须件)
-
-
 def display_options(game: GameEngine):
     """
     显示游戏选项
@@ -915,36 +913,153 @@ def new_game(no_auto_load=False):
     """
     主游戏逻辑
     """
-    commands = (
-        "help",
-        "save",
-        "load",
-        "new",
-        "config",
-        "exit",
-        "inv",
-        "opi",
-        "attr",
-        "summary",
-        "vars",
-        "custom",
-        "csmode",
-        "cs*f",
-        "think",
-        "setvar",
-        "delvar",
-        "conclude_summary",
-        "ana_token",
-        "fix_item_name",
-        "show_init_resp"
-    )
-
     extra_datas = ExtraData()
-
     game_instance = GameEngine(config)
+    show_init_resp = False
+    no_repeat_sign = False  # 运行指令后，原本的文字不再打字机效果输出
+    no_save_again_sign = False  # 运行查看类指令后，不再自动保存
+
+    def init_turn_datas():
+        nonlocal no_repeat_sign, no_save_again_sign
+        no_repeat_sign = False
+        no_save_again_sign = False
+        extra_datas.think_count_remain = int(max(
+            # 重置思考次数
+            min(game_instance.attr_system.get_attr("INT")//8, 4), -1)) + 1
+
+    def reg_cmds():
+        def cmd_csmode():
+            game_instance.prompt_manager.is_no_options = not game_instance.prompt_manager.is_no_options
+            print(
+                f"自定义模式{'开启' if game_instance.prompt_manager.is_no_options else '关闭'}")
+
+        def cmd_inv():
+            print(game_instance.item_system.get_inventory_text())
+
+        def cmd_opi():
+            nonlocal no_save_again_sign
+            if operate_item(game_instance):
+                init_turn_datas()
+                extra_datas.turns += 1
+            no_save_again_sign = False
+
+        def cmd_summary():
+            clear_screen()
+            print("<剧情摘要>")
+            print("\n".join(
+                [f"{i+1}. {it}" for i, it in enumerate(list(game_instance.history_simple_summaries))]))
+
+        def cmd_think():
+            nonlocal no_save_again_sign
+            if extra_datas and extra_datas.think_count_remain <= 0:
+                print("你无法再思考了，做出决定吧.")
+                return
+            content = input(
+                f"你思索某个疑问(思考次数还剩{int(extra_datas.think_count_remain)}次) 不输入内容以放弃思考 注意token消耗:\n:: ")
+            if content.strip() == "":
+                print("你放弃了思考.")
+                return
+            game_instance.think_go_game(content)
+            extra_datas.think_count_remain -= 1
+            no_save_again_sign = False
+
+        def cmd_csforce():
+            extra_datas.skip_csmode_action_modify = not extra_datas.skip_csmode_action_modify
+            print(
+                f"将{'跳过' if extra_datas.skip_csmode_action_modify else '不跳过'}自定义行动的行动修饰")
+
+        def cmd_ana_token():
+            analyze_token_consume(game_instance)
+
+        def cmd_fix_item_name():
+            nonlocal no_save_again_sign
+            game_instance.item_system.fix_item_name_error()
+            no_save_again_sign = False
+            print("道具名修复完成")
+
+        def cmd_show_init_resp():
+            nonlocal show_init_resp
+            show_init_resp = not show_init_resp
+            print(f"将显示AI原始响应与Token信息：{show_init_resp}")
+
+        def cmd_config():
+            nonlocal no_save_again_sign
+            game_instance.custom_config.config_game()
+            no_save_again_sign = False
+
+        def cmd_load():
+            nonlocal no_repeat_sign
+            loadsuccess, _ = manual_load(game_instance, extra_datas)
+            if loadsuccess:
+                print("成功加载，按任意键继续...")
+                no_repeat_sign = False  # 加载游戏成功，重新启用打字机效果
+            else:
+                print("加载失败，按任意键继续...")
+
+        def cmd_save():
+            manual_save(game_instance, extra_datas)
+
+        def cmd_delvar():
+            nonlocal no_save_again_sign
+            clear_screen()
+            print(game_instance.get_vars_text())
+            name = input("请输入要删除的变量名：\n:: ")
+            if name not in game_instance.variables:
+                print("变量不存在")
+            del game_instance.variables[name]
+            no_save_again_sign = False
+            print("完成删除")
+
+        def cmd_setvar():
+            nonlocal no_save_again_sign
+            clear_screen()
+            print(game_instance.get_vars_text())
+            name = input("请输入要设置的变量名：\n:: ")
+            val = input("请输入要设置的变量值：\n:: ")
+            game_instance.variables[name] = val
+            no_save_again_sign = False
+            print("完成设置")
+
+        def cmd_vars():
+            clear_screen()
+            print(game_instance.get_vars_text())
+
+        def cmd_attr():
+            print(game_instance.attr_system.get_attribute_text(colorize=True))
+
+        def cmd_conclude_summary():
+            nonlocal no_save_again_sign
+            game_instance.go_game("", False, True)
+            no_save_again_sign = False
+            print("总结完成")
+
+        cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
+        cmd_manager.reg("csmode", cmd_csmode, "切换自定义模式")
+        cmd_manager.reg("inv", cmd_inv, "查看物品")
+        cmd_manager.reg("opi", cmd_opi, "操作物品")
+        cmd_manager.reg("summary", cmd_summary, "查看摘要")
+        cmd_manager.reg("think", cmd_think, "思考/联想")
+        cmd_manager.reg("cs*f", cmd_csforce, "跳过自定义选项修饰")
+        cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
+        cmd_manager.reg("fix_item_name", cmd_fix_item_name, "修复物品名错误")
+        cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
+        cmd_manager.reg("config", cmd_config, "配置游戏")
+        cmd_manager.reg("load", cmd_load, "读取存档")
+        cmd_manager.reg("save", cmd_save, "保存")
+        cmd_manager.reg("delvar", cmd_delvar, "删除变量")
+        cmd_manager.reg("setvar", cmd_setvar, "设置/添加变量")
+        cmd_manager.reg("vars", cmd_vars, "显示变量")
+        cmd_manager.reg("attr", cmd_attr, "显示属性")
+        cmd_manager.reg("conclude_summary", cmd_conclude_summary, "总结摘要")
+        cmd_manager.reg("new", lambda: 1, "开始新游戏")
+        cmd_manager.reg("exit", lambda: 1, "退出游戏")
+    reg_cmds()
+
+    commands = cmd_manager.cmds
+
     clear_screen()
     print("等待读取..")
-    show_init_resp = False
+
     if not no_auto_load:
         loadsuccess, message = load_game(game_instance, extra_datas)
         print(message)
@@ -988,16 +1103,6 @@ def new_game(no_auto_load=False):
         # 游戏ID
         if not game_instance.game_id:
             game_instance.game_id = generate_game_id()
-    no_repeat_sign = False  # 运行指令后，原本的文字不再打字机效果输出
-    no_save_again_sign = False  # 运行查看类指令后，不再自动保存
-
-    def init_turn_datas():
-        nonlocal no_repeat_sign, no_save_again_sign
-        no_repeat_sign = False
-        no_save_again_sign = False
-        extra_datas.think_count_remain = int(max(
-            # 重置思考次数
-            min(game_instance.attr_system.get_attr("INT")//8, 4), -1)) + 1
 
     while game_instance.current_game_status == "ongoing":
         clear_screen()
@@ -1034,147 +1139,11 @@ def new_game(no_auto_load=False):
 
         if user_input == "exit":
             return 'exit'
-        elif user_input == "csmode":
-            game_instance.prompt_manager.is_no_options = not game_instance.prompt_manager.is_no_options
-            print(
-                f"自定义模式{'开启' if game_instance.prompt_manager.is_no_options else '关闭'}")
-            input("按任意键继续...")
-            continue
-        elif user_input == "inv":
-            print(game_instance.item_system.get_inventory_text())
-            input("按任意键继续...")
-            continue
-        elif user_input == "opi":
-            if operate_item(game_instance):
-                init_turn_datas()
-                continue
-            no_save_again_sign = False  # 确保即使进行了如更名之类的操作，也会保存
-            continue
-        elif user_input == "summary":
-            clear_screen()
-            print("<剧情摘要>")
-            print("\n".join(
-                [f"{i+1}. {it}" for i, it in enumerate(list(game_instance.history_simple_summaries))]))
-            input("按任意键继续...")
-            continue
-        elif user_input == "conclude_summary":
-            game_instance.go_game("", False, True)
-            no_save_again_sign = False
-            input("总结完成，按任意键继续...")
-            continue
-        elif user_input == "attr":
-            print(game_instance.attr_system.get_attribute_text(colorize=True))
-            input("按任意键继续...")
-            continue
-        elif user_input == "vars":
-            clear_screen()
-            print(game_instance.get_vars_text())
-            input("按任意键继续...")
-            continue
-        elif user_input == "setvar":
-            clear_screen()
-            print(game_instance.get_vars_text())
-            name = input("请输入要设置的变量名：\n:: ")
-            val = input("请输入要设置的变量值：\n:: ")
-            game_instance.variables[name] = val
-            no_save_again_sign = False
-            input("完成设置，按任意键继续...")
-            continue
-        elif user_input == "delvar":
-            clear_screen()
-            print(game_instance.get_vars_text())
-            name = input("请输入要删除的变量名：\n:: ")
-            if name not in game_instance.variables:
-                input("变量不存在，按任意键继续...")
-                continue
-            del game_instance.variables[name]
-            no_save_again_sign = False
-            input("完成删除，按任意键继续...")
-            continue
-        elif user_input == "save":
-            manual_save(game_instance, extra_datas)
-            input("按任意键继续...")
-            continue
-        elif user_input == "load":
-            loadsuccess, message = manual_load(game_instance, extra_datas)
-            if loadsuccess:
-                print("成功加载，按任意键继续...")
-                no_repeat_sign = False  # 加载游戏成功，重新启用打字机效果
-                continue
-            else:
-                print("加载失败，按任意键继续...")
-                continue
-        elif user_input == "config":
-            game_instance.custom_config.config_game()
-            no_save_again_sign = False
-            continue
         elif user_input == "new":
             return 'new_game'
-        elif user_input == "show_init_resp":
-            show_init_resp = not show_init_resp
-            print(f"将显示AI原始响应与Token信息：{show_init_resp}")
-            input("按任意键继续...")
-            continue
-        elif user_input == "fix_item_name":
-            game_instance.item_system.fix_item_name_error()
-            no_save_again_sign = False
-            print("道具名修复完成")
-            input("按任意键继续...")
-            continue
-        elif user_input == "ana_token":
-            analyze_token_consume(game_instance)
-            continue
-        elif user_input == "think":
-            if extra_datas and extra_datas.think_count_remain <= 0:
-                input("你无法再思考了，做出决定吧.(按任意键继续)")
-                continue
-            content = input(
-                f"你思索某个疑问(思考次数还剩{int(extra_datas.think_count_remain)}次) 不输入内容以放弃思考 注意token消耗:\n:: ")
-            if content.strip() == "":
-                input("你放弃了思考.(按任意键继续)")
-                continue
-            game_instance.think_go_game(content)
-            extra_datas.think_count_remain -= 1
-            no_save_again_sign = False
-            input("思考完成，按任意键继续...")
-            continue
-        elif user_input == "cs*f":
-            extra_datas.skip_csmode_action_modify = not extra_datas.skip_csmode_action_modify
-            print(
-                f"将{'跳过' if extra_datas.skip_csmode_action_modify else '不跳过'}自定义行动的行动修饰")
-            input("按任意键继续...")
-            continue
-
-        elif user_input == "help":
-            print("可用指令：")
-            print("-"*20)
-            print(f"{COLOR_GREEN}save{COLOR_RESET}:保存游戏")
-            print(f"{COLOR_GREEN}load{COLOR_RESET}:读取游戏")
-            print(f"{COLOR_GREEN}new{COLOR_RESET}:新游戏")
-            print(f"{COLOR_GREEN}config{COLOR_RESET}:配置游戏")
-            print(f"{COLOR_GREEN}exit{COLOR_RESET}: 退出游戏")
-            print(f"{COLOR_GREEN}inv{COLOR_RESET}: 查看道具")
-            print(f"{COLOR_GREEN}opi{COLOR_RESET}:进行道具操作")
-            print(f"{COLOR_GREEN}attr{COLOR_RESET}:显示属性")
-            print(f"{COLOR_GREEN}summary{COLOR_RESET}:查看摘要")
-            print(f"{COLOR_GREEN}vars{COLOR_RESET}:查看变量")
-            print("-"*20)
-            print(f"{COLOR_YELLOW}custom{COLOR_RESET}:自定义行动")
-            print(f"{COLOR_YELLOW}csmode{COLOR_RESET}:切换自定义模式")
-            print(f"{COLOR_YELLOW}cs*f{COLOR_RESET}:切换自定义行动的行动修饰")
-            print(f"{COLOR_YELLOW}think{COLOR_RESET}:思考/联想")
-            print(f"{COLOR_YELLOW}setvar{COLOR_RESET}:添加/设置变量")
-            print(f"{COLOR_YELLOW}delvar{COLOR_RESET}:删除变量")
-            print("-"*20)
-            print(f"{COLOR_RED}conclude_summary{COLOR_RESET}:手动总结当前摘要(不推荐)")
-            print(f"{COLOR_RED}ana_token{COLOR_RESET}:统计token数据")
-            print(f"{COLOR_RED}fix_item_name{COLOR_RESET}:修复道具名中的错误")
-            print(
-                f"{COLOR_RED}show_init_resp{COLOR_RESET}:切换显示对每轮剧情的AI的原始相应与Token信息(debug)")
-            console.rule(style="white")
-            input("按任意键继续...")
-            continue
-
+        elif user_input in commands:
+            cmd_manager.run(user_input)
+            input("按任意键继续..")
         else:
             extra_datas.turns += 1
             init_turn_datas()
