@@ -100,7 +100,7 @@
 1. **克隆项目**
 ```bash
 git clone <repository-url>
-cd AI-game-test
+cd AI-test-adv
 ```
 
 2. **安装依赖**
