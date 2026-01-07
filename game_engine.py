@@ -1,17 +1,38 @@
+"""
+游戏引擎
+"""
 # Copyright (c) 2025 [687jsassd]
 # MIT License
 # 游戏引擎
 import json
+import os
+import re
 import time
-import random
+import logging
+import gzip
 from math import atan
 from collections import deque
 from typing import Optional
 import openai
+from rich import print
 from json_repair import repair_json
-from config import CustomConfig, COLOR_CYAN, COLOR_RESET, COLOR_RED, COLOR_GREEN, COLOR_YELLOW, COLOR_BLUE, COLOR_MAGENTA
-from prompt_manager import PromptManager
-from animes import SyncLoadingAnimation, probability_check_animation
+from config import CustomConfig, CURRENT_TIME
+from libs.practical_funcs import (COLOR_RESET,
+                                  COLOR_RED,
+                                  COLOR_GREEN,
+                                  COLOR_YELLOW,)
+from libs.prompt_manager import PromptManager
+from libs.animes import SyncLoadingAnimation
+from libs.extra_item_inventory import ItemInventory
+from libs.extra_attributes import Attributes
+from libs.extra_situation import Situation
+from libs.formula_and_checks import GameFormulas, GameChecks
+from libs.logger import log_exceptions
+
+
+logger = logging.getLogger(__name__)
+
+AnimeLoader = SyncLoadingAnimation()
 
 
 class GameEngine:
@@ -24,14 +45,18 @@ class GameEngine:
         self.game_id = ''
         self.prompt_manager = PromptManager()
         self.current_response = ""
-        # self.conversation_history = [] #因大小过大，暂时弃用
+        self.conversation_history = []
         self.history_descriptions = []  # 存储历史剧情
         self.history_choices = []  # 存储历史玩家选择
         self.history_simple_summaries = []
         self.current_description = "游戏开始"
         self.current_options = []
         self.current_game_status = "ongoing"
+
+        # 摘要压缩部分
         self.summary_conclude_val = 24  # 当历史剧情超过24条时，对其进行压缩总结;所有摘要都会参与剧情生成.
+        self.conclude_summary_cooldown = 10
+        self.compressed_summary_textmin = 320  # 可认为为压缩摘要时的最小长度
 
         # Token统计部分
         self.total_prompt_tokens = 0
@@ -39,84 +64,49 @@ class GameEngine:
         self.total_completion_tokens = 0
         self.l_c_token = 0
         self.total_tokens = 0
+        self.token_consumes = []
 
         # 用户配置
         self.custom_config = custom_config or CustomConfig()
-
-        # 玩家相关部分
         self.player_name = self.custom_config.player_name
-        self.prompt_manager.prompts_sections["user_story"] = self.custom_config.player_story
+        self.prompt_manager.iset_user_story(self.custom_config.player_story)
 
         # 动画
-        self.anime_loader = SyncLoadingAnimation()
+        self.anime_loader = AnimeLoader
 
-        # 拓展-背包与道具(道具格式:{道具名:道具描述})
-        self.inventory = {}
-        # 拓展-玩家属性
-        self.character_attributes = {
-            "STR": 10.0,
-            "DEX": 10.0,
-            "INT": 10.0,
-            "WIS": 10.0,
-            "CHA": 10.0,
-            "LUK": 10.0,
-        }
-        # 拓展-形势(-10 到 10)
-        self.situation = 0
-        self.situation_text = {
-            (-99999, -10): "形势对你极其不利",
-            (-10, -7): "形势对你非常不利",
-            (-7, -4): "形势对你明显不利",
-            (-4, -1): "形势对你略显不利",
-            (-1, 1): "均势",
-            (1, 4): "形势对你略有利",
-            (4, 7): "形势对你明显有利",
-            (7, 10): "形势对你非常有利",
-            (10, 99999): "形势对你极其有利",
-        }
+        # 拓展
+        self.attr_system = Attributes()  # 属性系统
+        self.item_system = ItemInventory()  # 物品系统
+        self.situation_system = Situation()  # 形势系统
+        self.check_system = GameChecks()  # 检定系统  (不参与持久化，待完善，TODO:检定系统)
+        self.formula_system = GameFormulas()  # 各公式  (不参与持久化，待完善，TODO:公式系统)
+
         # 拓展-待显示消息的队列
         self.message_queue = deque()
 
-        # 拓展-每轮token消耗
-        self.token_consumes = []
-
-        # 拓展-历史摘要总结的cooldown
-        # 用于解决当压缩摘要占很多格子导致普通摘要没添加几个就总结时，间隔过短的问题。
-        self.conclude_summary_cooldown = 10
-
-        # 拓展-物品仓库(用于存储物品,不参与剧情)
-        self.item_repository = {}
-
-        # 拓展-是否无选项模式
-        self.prompt_manager.is_no_options = False
-
-        # 拓展-变量表
+        # 拓展-游戏变量表
         self.variables = {
         }
 
-    # 调用AI模型
-
+    # 基础-调用AI模型
+    @log_exceptions(logger)
     def call_ai(self, prompt: str):
         """
         调用AI模型
         """
-
         max_tokens = self.custom_config.max_tokens
         temperature = self.custom_config.temperature
         frequency_penalty = self.custom_config.frequency_penalty
         presence_penalty = self.custom_config.presence_penalty
-
         provider = self.custom_config.get_current_provider()
         model_name = provider["model"]
         api_key = provider["api_key"]
         base_url = provider["base_url"]
-
         try:
             client = openai.OpenAI(
                 api_key=api_key,
                 base_url=base_url,
             )
-
             # 构建请求参数字典
             params = {
                 "model": model_name,
@@ -125,18 +115,22 @@ class GameEngine:
                 "temperature": temperature,
                 "frequency_penalty": frequency_penalty,
                 "presence_penalty": presence_penalty,
-                "timeout": 100,
+                "timeout": openai.Timeout(
+                    connect=10.0,
+                    read=100.0,
+                    write=20.0,
+                    pool=5.0
+                )
             }
-
             # 混元不支持frequency_penalty,presence_penalty,如果模型是混元，去掉这两条
             if "hunyuan" in model_name:
                 del params["frequency_penalty"]
                 del params["presence_penalty"]
                 params["extra_body"] = {}
-
             # 调用API
+            logger.debug("调用AI模型: %s, 参数: %s", model_name, params)
             response = client.chat.completions.create(**params)
-
+            logger.debug("AI模型返回: %s", response)
             # 记录token使用情况
             if hasattr(response, 'usage'):
                 self.total_prompt_tokens += response.usage.prompt_tokens
@@ -145,9 +139,12 @@ class GameEngine:
                 self.l_c_token = response.usage.completion_tokens
                 self.total_tokens += response.usage.total_tokens
                 print(
-                    f"Token消耗 - 提示: {response.usage.prompt_tokens}, 完成: {response.usage.completion_tokens}, 总计: {response.usage.total_tokens}")
-
+                    f"\nToken消耗 - 提示词: {response.usage.prompt_tokens}, 输出: {response.usage.completion_tokens}, 总计: {response.usage.total_tokens}")
             self.current_response = response.choices[0].message.content
+            self.conversation_history.append(
+                {"role": "user", "content": prompt})
+            self.conversation_history.append(
+                {"role": "assistant", "content": self.current_response})
             if self.current_response:
                 # 有响应内容时直接返回
                 return self.current_response
@@ -162,23 +159,27 @@ class GameEngine:
                     # 提取完整的JSON部分
                     self.current_response = self.current_response[start_idx:end_idx+1]
                     return self.current_response
+        except openai.APITimeoutError:
+            self.anime_loader.stop_animation()
+            logger.error("相应超时")
+            print("相应超时 - 检查网络或者向我们反馈?")
+            print(f"当前配置:model={model_name},base_url={base_url}")
+            input("按任意键继续")
+            return None
         except (openai.OpenAIError, ValueError) as e:
+            self.anime_loader.stop_animation()
+            logger.error("调用AI模型时出错: %s", e)
             print(f"调用AI模型时出错: {e}")
             input("按任意键继续")
-            self.anime_loader.stop_animation()
-            return None
-        except TimeoutError:
-            print("调用AI模型超时(100s)")
-            input("按任意键继续")
-            self.anime_loader.stop_animation()
             return None
 
-    # 解析AI响应
-
+    # 基础-解析AI响应
+    @log_exceptions(logger)
     def parse_ai_response(self, response: str):
         """
         解析AI响应
         """
+        logger.debug("解析AI响应: %s", response)
         json_content = "未解析"
         # 把中文的引号和冒号、逗号替换为英文
         response = response.replace("“", '"').replace(
@@ -195,15 +196,16 @@ class GameEngine:
 
             json_response = json.loads(repair_json(json_content))
             while not isinstance(json_response, dict):
-                input(f"未能解析JSON响应??\n {json_response}")
+                logger.warning("未能解析JSON响应??\n %s", json_response)
                 if isinstance(json_response, list):
-                    input("列表类型？尝试第一个元素")
+                    logger.warning("列表类型？尝试第一个元素")
                     json_response = json_response[0]
                 elif isinstance(json_response, str):
-                    input("字符串类型？尝试解析为JSON")
+                    logger.warning("字符串类型？尝试解析为JSON")
                     json_response = json.loads(json_response)
                 else:
-                    input("按任意键重试")
+                    self.anime_loader.stop_animation()
+                    logger.error("解析JSON失败！")
                     return None
             try:
                 # 检查是否有指令(commands),有则执行
@@ -212,12 +214,12 @@ class GameEngine:
                         "commands", [])
                     self.handle_command(commands)
             except (ValueError, TypeError) as e:
-                print(f"解析指令时出错: {e}")
-                input("已跳过指令处理,按任意键继续解析")
+                logger.error("解析指令时出错: %s", e)
 
             self.current_options = json_response.get("options", [])
             if not self.current_options and not self.prompt_manager.is_no_options:
-                input(f"未能解析选项?? 按键重试 {json_response}")
+                logger.warning("未能解析选项??\n %s", json_response)
+                input(f"未能解析选项?? 按键重试 {json_response}\n")
                 return None
             elif self.prompt_manager.is_no_options:
                 self.current_options = [{
@@ -231,8 +233,18 @@ class GameEngine:
                 }]
             self.current_description = json_response.get("description", "")
             if not self.current_description.strip():
-                input(f"未能解析描述?? 按键重试 {json_response}")
+                logger.warning("未能解析描述??\n %s", json_response)
+                input(f"未能解析描述?? 按键重试 {json_response}\n")
                 return None
+            # 添加换行
+            self.current_description = re.sub(
+                r"。(?!』)",  # 正则规则：匹配"。"，且其后紧跟的不是"』"
+                "。\n",       # 替换成：。+换行符
+                self.current_description
+            )
+            self.current_description = self.current_description.replace(
+                "』", "』\n")
+
             if self.current_description:
                 self.history_simple_summaries.append(
                     json_response.get("summary", ""))
@@ -252,9 +264,7 @@ class GameEngine:
                         "next_preview": option.get("next_preview", ""),
                     })
                 except (ValueError, TypeError) as e:
-                    print(f"解析某选项时出错: {e},选项: {option}")
-                    input("已跳过该选项,按任意键继续解析")
-
+                    logger.error("解析某选项时出错: %s,选项: %s", e, option)
             self.current_options = tmp
             # 规范化选项，去除不是check但有probability的选项的probability条目
             for option in self.current_options:
@@ -269,35 +279,27 @@ class GameEngine:
                         option["difficulty"] = 0
                     if not option.get("main_factor"):
                         option["main_factor"] = "LUK"
-
-            # 美化描述
-            self.current_description = self.colorize(
-                self.current_description)
-            for option in self.current_options:
-                if option["next_preview"]:
-                    option["next_preview"] = self.colorize(
-                        option["next_preview"])
-                # 对选项文本也美化
-                option["text"] = self.colorize(option["text"])
-
             return json_response
         except (ValueError, json.JSONDecodeError) as e:
+            self.anime_loader.stop_animation()
+            logger.error("解析AI响应时出错: %s , 响应内容: %s", e, response)
             print(f"解析AI响应时出错: {e}")
             print("响应内容:")
             print(response)
-            print("解析内容:")
-            print(json_content)
             input("按任意键继续")
             return None
 
-    # 指令处理
+    # 基础-指令处理
+    @log_exceptions(logger)
     def handle_command(self, commands: list):
         """
         处理指令
         """
+        logger.debug("处理指令: %s", commands)
         for command in commands:
             if not isinstance(command, dict):
-                input(f'注意：指令{command}出错！\n\n{commands}')
+                self.anime_loader.stop_animation()
+                logger.error("指令格式错误: %s", command)
                 continue
             command_type = command.get("command")
             value = command.get("value")
@@ -308,76 +310,78 @@ class GameEngine:
                         item_name, item_desc = list(item_info.keys())[
                             0], list(item_info.values())[0]
                     else:
-                        item_name, item_desc = item_info, '无描述'
-                        # 对错误地将字典转换为字符串而作为物品名的物品进行修复
-                        if item_name.startswith('{') and item_name.endswith('}'):
-                            item_name = item_name[1:-1]
-                            # 以:进行分割，获取道具名和道具描述
-                            item_name, item_desc = item_name.split(':')
-                            # 去除首尾可能的引号
-                            item_name = item_name.strip('"').strip("'")
-                            item_desc = item_desc.strip('"').strip("'")
-                    # 调用修复函数，继续深层修复
-                    self.fix_item_name_error()
-                    # 如果已经有这个道具就不添加
-                    if item_name in self.inventory:
+                        logger.warning("指令值格式错误(不是字典): %s", item_info)
                         return
-                    self.inventory[item_name] = item_desc
+                    # 调用修复函数，继续深层修复
+                    self.item_system.fix_item_name_error()
+                    # 如果已经有这个道具就不添加
+                    if item_name in self.item_system.inventory:
+                        return
+                    self.item_system.inventory[item_name] = item_desc
                     # self.history_simple_summaries.append(
                     #    f"{self.custom_config.player_name}获得了道具{item_name}")
                     self.message_queue.append(
                         f"{COLOR_GREEN}你获得了道具{item_name}{COLOR_RESET}")
+                    logger.info("添加道具: %s, 描述: %s", item_name, item_desc)
                 else:
-                    print(f"[警告]:添加道具时未提供道具信息或者信息格式不正确{command}")
+                    logger.warning("添加道具时未提供道具信息或者信息格式不正确: %s", command)
             elif command_type == "remove_item":
                 if value:
-                    if value in self.inventory:
-                        del self.inventory[value]
+                    if value in self.item_system.inventory:
+                        del self.item_system.inventory[value]
                         # self.history_simple_summaries.append(
                         #    f"{self.custom_config.player_name}失去了道具{value}")
                         self.message_queue.append(
                             f"{COLOR_RED}你失去了道具{value}{COLOR_RESET}")
+                        logger.info("移除道具: %s", value)
                     else:
-                        print(f"[警告]:移除时玩家没有道具【{value}】{command}")
+                        logger.warning("移除时玩家没有道具【%s】: %s", value, command)
                 else:
-                    print(f"[警告]:移除道具时未提供道具信息{command}")
+                    logger.warning("移除道具时未提供道具信息: %s", command)
             elif command_type == "change_attr":
                 # value: 对象{"属性名": "属性值"}，属性名为力量 STR 敏捷 DEX 智力 INT 感知 WIS 魅力 CHA中的一个，属性值可以是负数。
                 if value:
                     if not isinstance(value, dict) or len(value) != 1:
-                        print("[警告]:改变属性时提供的信息格式错误")
+                        logger.warning("改变属性时提供的信息格式错误: %s", command)
                         continue
                     # 解析属性名和属性值
                     attribute_name, attribute_value = list(value.keys())[
                         0], float(list(value.values())[0])
                     desc = command.get("desc", "")
-                    if attribute_name in self.character_attributes:
-                        self.character_attributes[attribute_name] += attribute_value
+                    if self.attr_system.in_attrs(attribute_name):
+                        self.attr_system.set_attr(attribute_name, self.attr_system.get_attr(
+                            attribute_name) + attribute_value)
                         # self.history_simple_summaries.append(
                         #    f"{self.custom_config.player_name}的{attribute_name}属性{"因为"+desc+"而" if desc else ""}改变了{attribute_value}")
-                        change_message = f"{self.custom_config.player_name}的属性{attribute_name}{"因为"+desc+"而" if desc else ""}变动{attribute_value:+}(总{self.character_attributes[attribute_name]})"
+                        change_message = f"{self.custom_config.player_name}的属性{attribute_name}{"因为"+desc+"而" if desc else ""}变动{attribute_value:+}(总{self.attr_system.get_attr(attribute_name)})"
                         change_message = COLOR_GREEN + \
                             f"{change_message}"+COLOR_RESET if attribute_value > 0 else COLOR_RED + \
                             f"{change_message}"+COLOR_RESET
                         self.message_queue.append(
                             change_message)
+                        logger.info("改变属性: %s, 描述: %s, 变动值: %s",
+                                    attribute_name, desc, attribute_value)
                     else:
-                        print(f"[警告]:改变属性时玩家没有属性【{value}】{command}")
+                        logger.warning("改变属性时玩家没有属性【%s】: %s", value, command)
                 else:
-                    print(f"[警告]:改变属性时未提供属性信息{command}")
+                    logger.warning("改变属性时未提供属性信息: %s", command)
             elif command_type == "change_situation":
-                if value:
+                if value is not None:
                     if isinstance(value, str) and ((value.startswith(("+", "-")) and value[1:].isdigit()) or value.isdigit()):
+                        logger.warning("形势值不是整数,但可以转换: %s", command)
                         value = int(value)
                     if not isinstance(value, int):
-                        print(f"[警告]:改变形势值时提供的信息格式错误{command}")
+                        logger.warning("改变形势值时提供的信息格式错误: %s", command)
                         continue
-                    self.situation += value
-                    self.situation = max(0, min(self.situation, 10))
+                    self.situation_system.situation += value
+                    self.situation_system.situation = max(
+                        -10, min(self.situation_system.situation, 10))
+                    logger.info("改变形势值: %s, 变动值: %s", command, value)
                 else:
-                    print(f"[警告]:改变形势值时未提供形势值信息{command}")
+                    logger.warning("改变形势值时未提供形势值信息: %s", command)
             elif command_type == "gameover":
                 self.current_game_status = "failure"
+                logger.info("游戏结束: %s", command)
                 self.anime_loader.stop_animation()
                 self.anime_loader.start_animation(
                     "dot", message=COLOR_RED+"游戏结束"+COLOR_RESET)
@@ -385,16 +389,16 @@ class GameEngine:
                 self.anime_loader.stop_animation()
                 break
             elif command_type == "set_var":
-                if value:
-                    print(f"[调试]:设置变量时提供的信息{value}")
+                if value is not None:
+                    logger.debug("设置变量时提供的信息: %s", value)
                     if not isinstance(value, dict):
-                        input(f"[警告]:设置变量时提供的信息格式错误{command}")
+                        logger.warning("设置变量时提供的信息格式错误: %s", command)
                         continue
                     # 解析变量名和变量值(为多变量设置提供支持)
                     for var_name, var_value in value.items():
                         self.variables[var_name] = var_value
                 else:
-                    input(f"[警告]:设置变量时未提供变量信息{command}")
+                    logger.warning("设置变量时未提供变量信息: %s", command)
             elif command_type == "del_var":
                 if value:
                     # 解析变量名
@@ -402,41 +406,42 @@ class GameEngine:
                     if var_name in self.variables:
                         del self.variables[var_name]
                     else:
-                        print(f"[警告]:删除变量时玩家没有变量【{var_name}】{command}")
+                        logger.warning("删除变量时玩家没有变量【%s】: %s",
+                                       var_name, command)
                 else:
-                    print(f"[警告]:删除变量时未提供变量信息{command}")
+                    logger.warning("删除变量时未提供变量信息: %s", command)
 
-    # 开始游戏
-
+    # AI调用-开始游戏
+    @log_exceptions(logger)
     def start_game(self, st_story: str = ''):
         """
         开始游戏（第一轮）
         """
+        logger.info("开始游戏: %s", st_story)
         init_prompt = self.prompt_manager.get_initial_prompt(
             self.player_name,
             st_story,
             self.custom_config.get_custom_prompt(),
-            self.get_inventory_text_for_prompt(),
-            self.get_attribute_text())
-        # self.conversation_history.append(
-        #    {"role": "user", "content": init_prompt})
+            self.item_system.get_inventory_text_for_prompt(),
+            self.attr_system.get_attribute_text())
         ai_response = self.call_ai(init_prompt)
         while not ai_response:
-            input('无响应内容？任意键重试')
+            input('无响应内容？任意键重试\n')
             ai_response = self.call_ai(init_prompt)
         if ai_response:
             ok_sign = self.parse_ai_response(ai_response)
             while not ok_sign:
-                input(f"解析失败，按任意键重试.[注意Token消耗{self.total_tokens}]")
+                self.anime_loader.stop_animation()
+                input(f"解析失败，按任意键重试.[注意Token消耗{self.total_tokens}]\n")
                 ai_response = self.call_ai(init_prompt)
                 if ai_response:
                     ok_sign = self.parse_ai_response(ai_response)
-        # self.conversation_history.append(
-        #    {"role": "assistant", "content": ai_response})
         self.history_descriptions.append(self.current_description)
         self.token_consumes.append(self.l_p_token+self.l_c_token)
 
-    def go_game(self, option_id, is_custom=False, is_prompt_concluding=False):
+    # AI调用-进行游戏(后续轮次)
+    @log_exceptions(logger)
+    def go_game(self, option_id, is_custom=False, is_prompt_concluding=False, is_skip_csmode_action_modify=False):
         """
         进行游戏（后续轮次）
         """
@@ -447,143 +452,131 @@ class GameEngine:
             self.conclude_summary()
             return 0
         if is_custom:
+            logger.info("自定义选项: %s", option_id)
             selected_option = {"id": 999,
                                "text": option_id, "type": "normal", "next_preview": ""}
-            # 调用get_action_mode_prompt获取自定义动作的类型等修饰后选项的提示词，对选项进行修饰
-            custom_prompt = self.prompt_manager.get_action_mode_prompt(
-                self.player_name,
-                self.current_description,
-                '\n'.join(
-                    [i for i in self.history_simple_summaries[-7:] if i]),
-                option_id,
-                self.get_inventory_text_for_prompt(),
-                self.get_attribute_text(),
-                self.get_situation_text(),
-                self.custom_config.get_custom_prompt(),
-                self.get_vars_text())
-            # 手动解析response，获取type、main_factor、difficulty、base_probability、next_preview并赋予给selected_option
-            self.anime_loader.stop_animation()
-            self.anime_loader.start_animation(
-                "dot", message="等待选项修饰")
-            response = self.call_ai(custom_prompt)
-            self.token_consumes[-1] += self.l_p_token+self.l_c_token
-            self.anime_loader.stop_animation()
-            ok_sign = False
-            if response:
-                while not ok_sign:
-                    try:
-                        if not response:
-                            raise ValueError("AI响应为空")
-                        resp_dict = json.loads(repair_json(response))
-                        selected_option["type"] = resp_dict.get(
-                            "type", "normal")
-                        selected_option["main_factor"] = resp_dict.get(
-                            "main_factor", "LUK")
-                        selected_option["difficulty"] = resp_dict.get(
-                            "difficulty", 0)
-                        selected_option["base_probability"] = resp_dict.get(
-                            "base_probability", 0.3)
-                        selected_option["probability"] = selected_option["base_probability"]
-                        # 添加标记，以绕过门槛检测
-                        selected_option["extra"] = "custom_action"
-                        ok_sign = True
-                    except (ValueError, json.JSONDecodeError) as e:
-                        print(f"解析AI响应时出错: {e}")
-                        input(
-                            f"按任意键重试,注意token消耗(本次){self.l_c_token+self.l_p_token}")
-                        print("正在重试...")
-                        response = self.call_ai(custom_prompt)
-
+            if not is_skip_csmode_action_modify:
+                # 调用get_action_mode_prompt获取自定义动作的类型等修饰后选项的提示词，对选项进行修饰
+                custom_prompt = self.prompt_manager.get_action_mode_prompt(
+                    self.player_name,
+                    self.current_description,
+                    '\n'.join(
+                        [i for i in self.history_simple_summaries[-7:] if i]),
+                    option_id,
+                    self.item_system.get_inventory_text_for_prompt(),
+                    self.attr_system.get_attribute_text(),
+                    self.situation_system.get_situation_text(),
+                    self.custom_config.get_custom_prompt(),
+                    self.get_vars_text())
+                # 手动解析response，获取type、main_factor、difficulty、base_probability、next_preview并赋予给selected_option
+                self.anime_loader.stop_animation()
+                self.anime_loader.start_animation(
+                    "dot", message="等待选项修饰")
+                response = self.call_ai(custom_prompt)
+                self.token_consumes[-1] += self.l_p_token+self.l_c_token
+                self.anime_loader.stop_animation()
+                ok_sign = False
+                if response:
+                    while not ok_sign:
+                        try:
+                            if not response:
+                                raise ValueError("AI响应为空")
+                            resp_dict = json.loads(repair_json(response))
+                            selected_option["type"] = resp_dict.get(
+                                "type", "normal")
+                            selected_option["main_factor"] = resp_dict.get(
+                                "main_factor", "LUK")
+                            selected_option["difficulty"] = resp_dict.get(
+                                "difficulty", 0)
+                            selected_option["base_probability"] = resp_dict.get(
+                                "base_probability", 0.3)
+                            selected_option["probability"] = selected_option["base_probability"]
+                            # 添加标记，以绕过门槛检测
+                            selected_option["extra"] = "custom_action"
+                            ok_sign = True
+                            logger.info("自定义选项修饰: %s", resp_dict)
+                        except (ValueError, json.JSONDecodeError) as e:
+                            self.anime_loader.stop_animation()
+                            logger.error("解析AI响应时出错: %s", e)
+                            input(
+                                f"解析AI响应时出错，按任意键重试,注意token消耗(本次){self.l_c_token+self.l_p_token}")
+                            print("正在重试...")
+                            response = self.call_ai(custom_prompt)
         else:
             selected_option = next(
                 (opt for opt in self.current_options if int(opt["id"]) == int(option_id)), None)
+            logger.info("选项不修饰: %s", selected_option)
         if not selected_option:
+            logger.warning("无效的选项ID: %s", option_id)
             print("无效的选项ID")
             return -1
         if selected_option:
             if selected_option["type"] == "must" and selected_option.get("extra", "") != "custom_action":
-                if self.character_attributes.get(selected_option["main_factor"], 0) < selected_option["difficulty"]:
+                if self.attr_system.get_attr(selected_option["main_factor"]) < selected_option["difficulty"]:
                     print(
                         f"不满足选项要求[{selected_option['main_factor']}≥{selected_option['difficulty']}]")
+                    logger.info("选项要求未满足: %s", selected_option)
                     return -1
             elif selected_option["type"] == "must":
                 # 对于自定义操作，我们根据是否达到门槛添加是否成功标识即可，不直接return
-                if self.character_attributes.get(selected_option["main_factor"], 0) >= selected_option["difficulty"]:
+                if self.attr_system.get_attr(selected_option["main_factor"]) >= selected_option["difficulty"]:
                     selected_option["text"] += COLOR_GREEN + \
-                        "<满足要求-行动成功>"+COLOR_RESET
+                        "<满足行动条件>"+COLOR_RESET
+                    logger.info("选项要求满足: %s", selected_option)
                 else:
                     selected_option["text"] += COLOR_RED + \
-                        "<不满足要求-行动失败>"+COLOR_RESET
+                        "<不满足行动条件>"+COLOR_RESET
+                    logger.info("选项要求未满足: %s", selected_option)
             # 处理并检定概率(两次判定:第一次就成功：大成功；第二次:小成功；)
             if selected_option["type"] == "check":
-                final_chance_mark = False
+                logger.info("选项检定: %s", selected_option)
+                main_attr_val = self.attr_system.get_attr(
+                    selected_option["main_factor"])
+                diff_attr_difficulty = main_attr_val - \
+                    selected_option["difficulty"]
                 target_prob = selected_option["probability"] + \
-                    (self.character_attributes.get(
-                        selected_option["main_factor"], 0)-selected_option["difficulty"]) * 3 / 2000
-                # 计算形势n影响(若n为正，几率增加0.01*2.2*n**1.25,否则减少0.04*n)
-                situation_factor = self.situation
+                    diff_attr_difficulty * 3 / 2000
+                situation_factor = self.situation_system.situation
                 if situation_factor > 0:
-                    target_prob += 0.01*2.2*situation_factor**1.25
+                    target_prob += 0.01 * 2.2 * (situation_factor ** 1.25)
                 else:
-                    target_prob += 0.04*situation_factor
-                # 检定成功概率(第一次判定)
-                success_prob = random.uniform(0, 1)
-                print("正在进行第一次检定")
-                probability_check_animation(
-                    success_prob,
-                    target_prob=max(target_prob*0.65, 0.01),
-                    duration=2
+                    target_prob += 0.04 * situation_factor
+                is_enable_final_chance = diff_attr_difficulty > 5
+                final_chance_prob = final_chance_target = 0.0
+                if is_enable_final_chance:
+                    final_chance_prob = final_chance_target = (
+                        diff_attr_difficulty - 5) / 100
+                check_result = self.check_system.probability_check(
+                    target=target_prob,
+                    is_enable_normal=False,  # 无"不成功也不失败"的情况
+                    is_enable_double_check=True,  # 启用二次检定（大成功/小成功/失败逻辑）
+                    first_check_factor=0.65,  # 第一次检定目标值系数（0.65）
+                    second_check_factor=1.00,  # 第二次检定目标值系数（1.0）
+                    allow_base_first_success=True,  # 第一次检定保底1%概率
+                    big_failure_prob_addon=0.20,  # 大失败触发阈值（+0.20）
+                    is_enable_final_chance=is_enable_final_chance,  # 动态启用最后机会
+                    final_chance_prob=final_chance_prob,  # 最后机会触发概率
+                    final_chance_target=final_chance_target,  # 最后机会判定目标值
+                    first_check_anime_duration=2.0,  # 第一次检定动画时长（2s）
+                    second_check_anime_duration=3.0,  # 第二次检定动画时长（3s）
+                    final_chance_anime_duration=2.5  # 最后机会动画时长（2.5s）
                 )
-                if success_prob < max(target_prob*0.65, 0.01):
-                    # 成功
-                    selected_option["text"] += COLOR_GREEN + \
-                        "<检定大成功!>"+COLOR_RESET
-                    print(COLOR_GREEN+"检定大成功! "+COLOR_RESET)
-                else:
-                    print("正在进行第二次检定")
-                    new_success_prob = random.uniform(0, 1)
-                    cur_min = min(new_success_prob, success_prob)
-                    probability_check_animation(
-                        new_success_prob,
-                        target_prob=target_prob,
-                        duration=3
-                    )
-                    if new_success_prob < target_prob:
-                        # 成功
-                        selected_option["text"] += COLOR_YELLOW + \
-                            "<检定小成功>"+COLOR_RESET
-                    else:
-                        # 如果自己的主属性>选项要求+5,则差值的百分比的概率获得最后一次机会
-                        # 目标值是差值的百分比
-                        if self.character_attributes.get(
-                                selected_option["main_factor"], 0)-selected_option["difficulty"] > 5:
-                            last_chance_prob = random.uniform(0, 1)
-                            last_target = (self.character_attributes.get(
-                                selected_option["main_factor"], 0)-selected_option["difficulty"]-5) / 100
-                            if last_chance_prob < last_target:
-                                print(COLOR_MAGENTA+"最后机会"+COLOR_RESET)
-                                last_chance_prob = random.uniform(0, 1)
-                                probability_check_animation(
-                                    last_chance_prob,
-                                    target_prob=last_target,
-                                    duration=2.5
-                                )
-                                if last_chance_prob < last_target:
-                                    selected_option["text"] += COLOR_MAGENTA + \
-                                        "<检定小成功>"+COLOR_RESET
-                                    final_chance_mark = True
-                                else:
-                                    cur_min = min(last_chance_prob, cur_min)
-
-                        if not final_chance_mark and cur_min >= 0.20+target_prob:
-                            selected_option["text"] += COLOR_RED + \
-                                "<检定大失败>"+COLOR_RESET
-                        elif not final_chance_mark:
-                            selected_option["text"] += COLOR_RED + \
-                                "<检定小失败>"+COLOR_RESET
-
-            self.history_choices.append(
-                COLOR_BLUE+selected_option["text"]+COLOR_RESET)
+                if check_result == 3:
+                    # 大成功
+                    stext = "检定大成功!"
+                    print(stext)
+                elif check_result == 1:
+                    # 小成功（含最后机会成功）
+                    stext = "检定小成功"
+                elif check_result == -1:
+                    # 小失败
+                    stext = "检定小失败"
+                elif check_result == -3:
+                    # 大失败
+                    stext = "检定大失败"
+                selected_option["text"] += f'<{stext}>'
+                logger.info("选项检定结果: %s", check_result)
+            self.history_choices.append('['+selected_option["text"]+']')
 
             prompt = self.prompt_manager.get_continuation_prompt(
                 self.player_name,
@@ -593,15 +586,13 @@ class GameEngine:
                 selected_option["text"],
                 selected_option["next_preview"],
                 self.custom_config.get_custom_prompt(),
-                self.get_inventory_text_for_prompt(),
-                self.get_attribute_text(),
-                self.get_situation_text(),
+                self.item_system.get_inventory_text_for_prompt(),
+                self.attr_system.get_attribute_text(),
+                self.situation_system.get_situation_text(),
                 self.get_vars_text())
 
-            # self.conversation_history.append(
-            #    {"role": "user", "content": prompt})
-
         if not prompt:
+            logger.error("prompt为空")
             raise ValueError("prompt为空")
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation("spinner", message="等待<世界>回应")
@@ -617,15 +608,17 @@ class GameEngine:
         self.conclude_summary_cooldown -= 1
 
         self.anime_loader.stop_animation()  # type:ignore
-        # self.conversation_history.append(
-        #    {"role": "assistant", "content": ai_response})
         self.history_descriptions.append(self.current_description)
         return 0
 
+    # AI调用-思考(think指令)
+    @log_exceptions(logger)
     def think_go_game(self, think_context):
         """玩家思考游戏中的情况"""
-        think_success_or_not = self.probability_check(
-            0.2 + 0.6873 * atan(0.02345 * self.character_attributes.get("INT", 10)), is_enable_double_check=True)
+        logger.info("思考: %s", think_context)
+        think_success_or_not = self.check_system.probability_check(
+            0.2 + 0.6873 * atan(0.02345 * self.attr_system.get_attr("INT")), is_enable_double_check=True)
+        logger.info("思考结果: %s", think_success_or_not)
         if think_success_or_not == 3:
             think_context += "(大成功)"
         elif think_success_or_not == 1:
@@ -640,364 +633,74 @@ class GameEngine:
             self.current_description,
             "\n".join(
                 [str(s) for s in self.history_simple_summaries[:-1] if s is not None]),
-            self.get_inventory_text_for_prompt(),
-            self.get_situation_text())
+            self.item_system.get_inventory_text_for_prompt(),
+            self.situation_system.get_situation_text())
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation("dot", message="思考中")
         res = self.call_ai(prompt)
         while not res:
-            input(f"AI响应失败，按任意键重试.[注意Token消耗{self.total_tokens}]")
+            self.anime_loader.stop_animation()
+            logger.error("思考时调用AI模型相应为空")
+            input(f"AI响应失败，按任意键重试.[注意Token消耗{self.total_tokens}]\n")
             res = self.call_ai(prompt)
-        self.current_description += "\n\n" + \
-            COLOR_BLUE+f"[思考:{think_context}] "+COLOR_RESET+res
+        self.current_description += "\n[思考:{think_context}] "+res
         self.history_descriptions[-1] = self.current_description
         self.token_consumes[-1] += self.l_p_token+self.l_c_token
-        self.anime_loader.stop_animation()  # type:ignore
+        self.anime_loader.stop_animation()
         return 0
 
-    def get_token_stats(self):
-        """获取token统计信息"""
-        return {
-            "本次输入消耗": self.l_p_token,
-            "本次生成消耗": self.l_c_token,
-            "本轮总消耗token": self.l_p_token+self.l_c_token,
-            "全局输入token消耗量": self.total_prompt_tokens,
-            "全局生成token消耗量": self.total_completion_tokens,
-            "全局总token消耗量": self.total_tokens,
-        }
-
-    def get_inventory_text(self, need_desc=True):
-        """获取当前道具列表的文本描述"""
-        if not self.inventory:
-            return "当前没有道具"
-        nums_text = f"{len(self.inventory)}" if len(
-            self.inventory) <= 50 else f"{len(self.inventory)},但其中{len(self.inventory)-50}个道具不会参与剧情。如想，尝试丢弃物品？"
-        available_items = self.inventory.items() if len(
-            self.inventory) <= 50 else list(self.inventory.items())[-50:]
-        no_available_items = list(self.inventory.items())[:-50] if len(
-            self.inventory) > 50 else []
-        return f"当前道具列表（{nums_text}）：\n" + "\n".join([f"{idx+1}.{COLOR_YELLOW}{item}{COLOR_RESET}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(available_items)] + [f"{idx+len(available_items)+1}.{COLOR_RED}[✘]{item}{COLOR_RESET}: {desc}" for idx, (item, desc) in enumerate(no_available_items)])
-
-    def get_item_repository_text(self, need_desc=True):
-        """获取物品仓库的文本描述"""
-        if not self.item_repository:
-            return "物品仓库当前没有道具"
-        return f"物品仓库当前道具列表（{len(self.item_repository)}）：\n" + "\n".join([f"{idx+1}.{COLOR_YELLOW}{item}{COLOR_RESET}: {desc if need_desc else ''}" for idx, (item, desc) in enumerate(self.item_repository.items())])
-
-    def get_attribute_text(self, colorize=False):
-        """获取当前属性列表的文本描述"""
-        if not self.character_attributes:
-            return "玩家当前没有属性"
-        if colorize:
-            ret = f"""
-            当前属性
-            {COLOR_RED}力量 STR:{self.character_attributes["STR"]}{COLOR_RESET}
-            {COLOR_GREEN}敏捷 DEX:{self.character_attributes["DEX"]}{COLOR_RESET}
-            {COLOR_BLUE}智力 INT:{self.character_attributes["INT"]}{COLOR_RESET}
-            {COLOR_CYAN}感知 WIS:{self.character_attributes["WIS"]}{COLOR_RESET}
-            {COLOR_MAGENTA}魅力 CHA:{self.character_attributes["CHA"]}{COLOR_RESET}
-            {COLOR_YELLOW}幸运 LUK:{self.character_attributes["LUK"]}{COLOR_RESET}
-            """
-            return ret
-        return "玩家属性：\n" + "\n".join([f"{attr}: {value}" for attr, value in self.character_attributes.items()])
-
-    def get_inventory_text_for_prompt(self):
-        """获取当前道具列表的文本描述，更简洁"""
-        if not self.inventory:
-            return "玩家当前没有道具"
-        if len(self.inventory) <= 12:
-            return "当前道具列表：\n" + "\n".join([f"{COLOR_YELLOW}{item}{COLOR_RESET}(描述:{desc})" for item, desc in self.inventory.items()])
-        else:
-            return "当前持有道具：\n" + "\n".join([f"{item}(描述:{desc})" for item, desc in self.inventory.items()][-25:]) + f"\n以及过去的道具:{', '.join([item for item, desc in self.inventory.items()][-35:-12])}"
-
-    def get_situation_text(self, add_numbers=False):
-        """获取当前形势的文本描述"""
-        if self.situation > 10:
-            self.situation = 10
-        if self.situation < -10:
-            self.situation = -10
-        for tp, texts in self.situation_text.items():
-            if tp[0] <= self.situation < tp[1]:
-                if add_numbers:
-                    return f"当前的形势值:{self.situation}({texts})"
-                return texts
-
-    def get_vars_text(self):
-        """获取当前变量的文本描述"""
-        if not self.variables:
-            return "当前没有变量"
-        text = "游戏变量表：\n"
-        for var_name, var_value in self.variables.items():
-            text += f"{var_name}:{var_value}\n"
-        return text
-
-    def log_game(self, log_file: str):
-        """记录游戏信息，处理Unicode编码问题"""
-        # def safe_json_dump(data, file_handle):
-        #    """安全地序列化并写入JSON数据"""
-        #    try:
-        #        json_str = json.dumps(data, ensure_ascii=False)
-        #        file_handle.write(json_str + "\n")
-        #    except (UnicodeEncodeError, UnicodeDecodeError):
-        #        # 如果遇到编码问题，使用ASCII安全模式
-        #        json_str = json.dumps(data, ensure_ascii=True)
-        #        file_handle.write(json_str + "\n")
-        #    except Exception as e:
-        #        # 记录错误信息
-        #        error_data = {
-        #            "error": f"序列化失败: {str(e)}", "data_type": str(type(data))}
-        #        file_handle.write(json.dumps(
-        #            error_data, ensure_ascii=True) + "\n")
-        # 使用内置open函数，设置errors='replace'处理编码问题
-        # with open(log_file, "w", encoding="utf-8", errors="replace") as f:
-        #    safe_json_dump({"player_name": self.player_name}, f)
-        #    safe_json_dump({"Time": CURRENT_TIME}, f)
-        #    safe_json_dump({"token_usage": self.get_token_stats()}, f)
-
-        #    for entry in self.conversation_history:
-        #        safe_json_dump(entry, f)
-
-        # 新文件导出剧情及玩家对应的选择
-        narrative_file = log_file.replace(".log", "_narrative.log")
-        with open(narrative_file, "w", encoding="utf-8", errors="replace") as f:
-            for desc, choice in zip(self.history_descriptions, self.history_choices):
-                # 清理文本
-                def clean_text(text):
-                    if text is None:
-                        return ""
-                    if isinstance(text, str):
-                        return text
-                    return str(text)
-
-                clean_desc = clean_text(desc)
-                clean_choice = clean_text(choice)
-                f.write(f"{clean_desc}\n{clean_choice}\n\n")
-
-    def fix_item_name_error(self):
-        """修复物品名中的错误"""
-        fixed_dict = {}
-        for item in self.inventory.keys():
-            if self.inventory[item] != "无描述":
-                fixed_dict[item] = self.inventory[item]
-                continue
-            cur_texts = []
-            name = ""
-            for i in item:
-                if i == ':':
-                    name = "".join(cur_texts)
-                    cur_texts = []
-                    continue
-                if i not in ['"', "'", '{', '}']:
-                    cur_texts.append(i)
-            # 如果无道具名但有描述，则描述去除逗号、句号作为道具名
-            if name == "" and not cur_texts:
-                name = "".join(cur_texts).replace(',', '').replace(
-                    '.', '').replace('，', '').replace('。', '')
-                cur_texts = ["无描述"]
-            fixed_dict[name] = "".join(cur_texts)
-        self.inventory = fixed_dict
-
-    def print_all_messages_await(self):
-        """打印所有待显示消息"""
-        while self.message_queue:
-            print(self.message_queue.popleft())
-
-    def probability_check(self,
-                          target: float,
-                          is_enable_normal: bool = False,
-                          normal_range_factor: float = 0.1,
-                          is_enable_double_check: bool = False,
-                          first_check_factor: float = 0.65,
-                          second_check_factor: float = 1.00,
-                          allow_base_first_success: bool = True,
-                          big_failure_prob_addon: float = 0.20,
-                          is_enable_final_chance: bool = False,
-                          final_chance_prob: float = 0.05,
-                          final_chance_target: float = 0.05,
-
-                          ):
-        """
-        概率判定函数
-        target:目标值 0-1
-        is_enable_normal: 是否允许"不成功也不失败"的情况
-        normal_range_factor: 上述情况所占范围系数(为目标值左右范围)
-        is_enable_double_check: 是否启用二次判定,如不启用则只判定一次
-            若启用，则返回值分别为3,1,-1或-3，分别表示大成功、小成功、小失败、大失败
-            否则，返回2或-2，表示成功、失败
-        first_check_factor:二次判定中第一次判定的目标值系数
-        second_check_factor二次判定中第二次判定的目标值系数
-        allow_base_first_success: 是否允许第一次判定中保底有1%的概率
-        big_failure_prob_addon: 大失败当判定中最小值大于目标值多少才会触发
-        is_enable_final_chance: 是否启用最后机会
-        final_chance_prob: 最后机会触发概率
-        final_chance_target: 最后机会的目标值
-        """
-        result = 0
-        if is_enable_double_check:
-            first_result, second_result = 0, 0
-            first_target = target * first_check_factor
-            if allow_base_first_success:
-                first_target = max(first_target, 0.01)
-            rand_first = random.uniform(0, 1)
-            print("正在进行第一次检定")
-            probability_check_animation(
-                rand_first,
-                target_prob=first_target,
-                duration=2
-            )
-            if rand_first < first_target:
-                first_result = 1
-
-            second_target = target * second_check_factor
-            if allow_base_first_success:
-                second_target = max(second_target, 0.01)
-            rand_second = random.uniform(0, 1)
-            print("正在进行第二次检定")
-            probability_check_animation(
-                rand_second,
-                target_prob=second_target,
-                duration=2
-            )
-            if rand_second < second_target:
-                second_result = 1
-
-            if first_result == 1:
-                return 3  # 第一次就成功，则大成功
-
-            if second_result == 1:
-                return 1  # 第二次才成功，则小成功
-
-            if is_enable_normal and abs(rand_first - target) < normal_range_factor:
-                return 0  # 不成功不失败
-
-            if min(rand_first, rand_second) < target + big_failure_prob_addon:
-                result = -1  # 小失败
-
-            else:
-                result = -3  # 大失败
-
-        else:
-            rand = random.uniform(0, 1)
-            probability_check_animation(
-                rand,
-                target_prob=target,
-                duration=2
-            )
-            if rand < target:
-                return 2  # 成功
-
-            if is_enable_normal and abs(rand - target) < normal_range_factor:
-                return 0  # 不成功不失败
-
-            else:
-                result = -2  # 失败
-
-        # 最后机会
-        # 随机数决定是否启用
-        if not is_enable_final_chance:
-            return result
-
-        enable_final_chance_prob = random.uniform(0, 1)
-        if enable_final_chance_prob < final_chance_prob:
-            final_chance_rand = random.uniform(0, 1)
-            probability_check_animation(
-                final_chance_rand,
-                target_prob=final_chance_target,
-                duration=2
-            )
-            if final_chance_rand < final_chance_target:
-                return 1  # 小成功
-        return result
-
+    # AI调用-判断使用物品是否合理
+    @log_exceptions(logger)
     def is_use_item_ok(self, focus_item: str, player_move: str, target: str = ""):
         """判断使用物品是否合理"""
-
+        logger.info("判断使用物品是否合理: %s, %s, %s", focus_item, player_move, target)
         prompt = self.prompt_manager.get_use_item_prompt(
             player_name=self.player_name,
             cur_desc=self.current_description,
             player_move=player_move,
             focus_item=focus_item,
-            focus_item_desc=self.inventory[focus_item],
+            focus_item_desc=self.item_system.inventory[focus_item],
             target=target
         )
         response = self.call_ai(prompt)
         if not response:
-            input('注意：AI未给出响应')
+            logger.error("判断使用物品是否合理时调用AI模型相应为空")
             return True
         try:
             is_ok = json.loads(response)["is_valid"] == 1
         except (json.JSONDecodeError, KeyError, ValueError):
+            logger.warning("判断使用物品是否合理时解析AI模型相应失败，默认返回False")
             is_ok = False
         self.token_consumes[-1] += self.l_p_token+self.l_c_token
+        logger.info("判断使用物品是否合理结果: %s", is_ok)
         return is_ok
 
-    def colorize(self, text: str):
-        """
-        对文本进行颜色美化
-        """
-        remain_color_stack = [COLOR_RESET]  # 用于修正嵌套错误
-        remain_need_close_chars_stack = []
-        finally_text = []  # 用于避免频繁创建字符串
-        current_printing_color = COLOR_RESET
-        color_convert_dict = {
-            "<": COLOR_MAGENTA,
-            "[": COLOR_CYAN,
-            "『": COLOR_YELLOW,
-            "《": COLOR_MAGENTA,
-            "「": COLOR_GREEN,
-        }
-        close_chars = {
-            ">": "<",
-            "]": "[",
-            "』": "『",
-            "》": "《",
-            "」": "「",
-        }
-        # 从开始向字符串末尾逐字符扫描替换
-        for i in text:
-            if i in color_convert_dict:
-                current_printing_color = color_convert_dict[i]
-                remain_need_close_chars_stack.append(i)
-                remain_color_stack.append(current_printing_color)
-                finally_text.append(current_printing_color+i)
-            elif i in close_chars:
-                if remain_need_close_chars_stack and remain_need_close_chars_stack[-1] == close_chars[i]:
-                    remain_need_close_chars_stack.pop()
-                else:
-                    input(f"[文本美化]注意：不符合预期的文本嵌套结构{text}\n 文本将不会被美化 \n按任意键继续")
-                    return text
-                if remain_color_stack:
-                    remain_color_stack.pop()
-                    current_printing_color = remain_color_stack[-1] if remain_color_stack else COLOR_RESET
-                    finally_text.append(i+current_printing_color)
-                else:
-                    finally_text.append(i+COLOR_RESET)
-            else:
-                finally_text.append(i)
-        finally_text.append(COLOR_RESET)  # 强制重置颜色
-        return ''.join(finally_text)
-
+    # AI调用-总结摘要并去除无用物品和变量
+    @log_exceptions(logger)
     def conclude_summary(self):
         """
         总结摘要，清理无用物品和变量
         """
+        logger.info("总结摘要并去除无用物品和变量")
+
         def phase_summary(resp):
             try:
                 r = json.loads(repair_json(resp))
                 summ = r["summary"]
-                rmv_item = r["rmv_item"]
-                rmv_var = r["rmv_var"]
+                rmv_item = r["useless_items"]
+                rmv_var = r["useless_vars"]
                 return 1, summ, rmv_item, rmv_var
             except (json.JSONDecodeError, KeyError, ValueError) as e:
-                print(f"[警告]:总结历史剧情时解析json失败{resp}，错误信息：{e}")
+                logger.warning("[警告]:总结历史剧情时解析json失败%s，错误信息：%s", resp, e)
                 return 0, "", [], []
 
         # 当所有摘要都经过了压缩，我们采取稀释旧摘要策略
-        if not any(i and len(i) < 400 for i in self.history_simple_summaries[:-1]):
+        if not any(i and len(i) < self.compressed_summary_textmin for i in self.history_simple_summaries[:-1]):
+            logger.info("使用稀释旧摘要策略")
             prompt = self.prompt_manager.get_summary_prompt(
                 '\n'.join(
                     [str(s) for s in self.history_simple_summaries[:10] if s is not None]),
-                self.get_inventory_text_for_prompt(),
+                self.item_system.get_inventory_text_for_prompt(),
                 self.get_vars_text())
             self.anime_loader.stop_animation()
             self.anime_loader.start_animation(
@@ -1009,6 +712,7 @@ class GameEngine:
             self.anime_loader.stop_animation()
             ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
             while not ok_sign:
+                logger.error("总结历史剧情时解析json失败(稀释旧摘要)%s", summary)
                 input(f"[警告]:总结历史剧情时解析json失败{summary}，按任意键重试")
                 summary = self.call_ai(prompt)
                 ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
@@ -1021,15 +725,17 @@ class GameEngine:
             self.conclude_summary_cooldown = 10
             self.token_consumes[-1] += self.l_p_token+self.l_c_token
             return 0
+
         # 否则，我们只总结新摘要，形成压缩摘要
+        logger.info("使用压缩新摘要策略")
         prompt = self.prompt_manager.get_summary_prompt(
             "\n".join(
-                [i for i in self.history_simple_summaries if i and len(i) < 400]),
-            self.get_inventory_text_for_prompt(),
+                [i for i in self.history_simple_summaries if i and len(i) < self.compressed_summary_textmin]),
+            self.item_system.get_inventory_text_for_prompt(),
             self.get_vars_text())
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation(
-            "dot", message=COLOR_YELLOW+"正在总结历史剧情"+COLOR_RESET)
+            "dot", message=COLOR_YELLOW+"正在总结历史剧情 并清理无用信息"+COLOR_RESET)
         tmp = self.custom_config.max_tokens
         self.custom_config.max_tokens = 2048
         summary = self.call_ai(prompt)
@@ -1037,11 +743,12 @@ class GameEngine:
         self.anime_loader.stop_animation()
         ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
         while not ok_sign:
+            logger.error("总结历史剧情时解析json失败(压缩新摘要)%s", summary)
             input(f"[警告]:总结历史剧情时解析json失败{summary}，按任意键重试")
             summary = self.call_ai(prompt)
             ok_sign, summ, rmv_item, rmv_var = phase_summary(summary)
         self.history_simple_summaries = [
-            i for i in self.history_simple_summaries if i and len(i) >= 400] + [summ]
+            i for i in self.history_simple_summaries if i and len(i) >= self.compressed_summary_textmin] + [summ]
         for item in rmv_item:
             self.iremove_item(item)
         for var in rmv_var:
@@ -1050,15 +757,103 @@ class GameEngine:
         self.token_consumes[-1] += self.l_p_token+self.l_c_token
         return 0
 
+    # 统计-获取token统计信息
+
+    def get_token_stats(self):
+        """获取token统计信息"""
+        return {
+            "本次输入消耗": self.l_p_token,
+            "本次生成消耗": self.l_c_token,
+            "本轮总消耗token": self.l_p_token+self.l_c_token,
+            "全局输入token消耗量": self.total_prompt_tokens,
+            "全局生成token消耗量": self.total_completion_tokens,
+            "全局总token消耗量": self.total_tokens,
+        }
+
+    # 文本-获取当前变量的文本描述
+
+    def get_vars_text(self):
+        """获取当前变量的文本描述"""
+        if not self.variables:
+            return "当前没有变量"
+        text = "游戏变量表(变量名:值)：\n"
+        for var_name, var_value in self.variables.items():
+            text += f"{var_name}:{var_value}\n"
+        return text
+
+    # 日志-记录游戏剧本
+    @log_exceptions(logger)
+    def log_game(self, log_file: str):
+        """记录游戏信息，处理Unicode编码问题"""
+        def safe_json_dump(data, file_handle):
+            """安全地序列化并写入JSON数据"""
+            try:
+                json_str = json.dumps(data, ensure_ascii=False, indent=2)
+                file_handle.write(json_str + "\n")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                logger.warning("数据包含非ASCII字符，使用ASCII安全模式序列化")
+                json_str = json.dumps(data, ensure_ascii=True, indent=2)
+                file_handle.write(json_str + "\n")
+            except Exception as e:
+                logger.error("序列化失败: %s, 数据类型: %s", str(e), str(type(data)))
+
+        def clean_text(text):
+            """清理文本，处理None/非字符串类型"""
+            if text is None:
+                return ""
+            if isinstance(text, str):
+                return text.strip()
+            return str(text).strip()
+
+        logger.info("记录游戏信息到压缩文件: %s", log_file)
+        base_dir = os.path.dirname(log_file)
+        log_filename = os.path.basename(log_file)
+        game_dir = os.path.join(base_dir, str(self.game_id))
+        os.makedirs(game_dir, exist_ok=True)
+
+        log_filename_gz = log_filename.replace(".log", ".log.gz")
+        new_log_file = os.path.join(game_dir, log_filename_gz)
+        narrative_filename = log_filename.replace(".log", "_narrative.log.gz")
+        new_narrative_file = os.path.join(game_dir, narrative_filename)
+
+        with gzip.open(new_log_file, "wt", encoding="utf-8", errors="replace") as f:
+            safe_json_dump({"player_name": self.player_name}, f)
+            safe_json_dump({"Time": CURRENT_TIME}, f)
+            safe_json_dump({"token_usage": self.get_token_stats()}, f)
+            for entry in self.conversation_history:
+                safe_json_dump(entry, f)
+
+        narrative_data = {}
+        for idx, (desc, choice) in enumerate(zip(self.history_descriptions, self.history_choices)):
+            round_num = idx + 1
+            narrative_data[round_num] = {
+                "desc": clean_text(desc),
+                "choice": clean_text(choice)
+            }
+        logger.info("记录游戏剧本到压缩文件: %s", new_narrative_file)
+        with gzip.open(new_narrative_file, "wt", encoding="utf-8", errors="replace") as f:
+            safe_json_dump(narrative_data, f)
+
+    # 显示-打印所有待显示消息
+
+    def print_all_messages_await(self):
+        """打印所有待显示消息"""
+        while self.message_queue:
+            print(self.message_queue.popleft())
+
+    # 快捷指令-移除物品
+
     def iremove_item(self, item: str):
         """
         构造命令，从物品列表中移除物品
         """
         commands = [{
             "command": "remove_item",
-            "item": item
+            "value": item
         }]
         self.handle_command(commands)
+
+    # 快捷指令-移除变量
 
     def idel_var(self, var: str):
         """
@@ -1066,6 +861,6 @@ class GameEngine:
         """
         commands = [{
             "command": "del_var",
-            "var": var
+            "value": var
         }]
         self.handle_command(commands)

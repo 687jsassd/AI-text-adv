@@ -1,8 +1,18 @@
+"""
+提供同步加载动画类，用于在AI生成或加载时显示等待动画
+"""
+# Copyright (c) 2025 [687jsassd]
+# MIT License
+
 from typing import Optional, Callable
 import threading
 import time
 from datetime import datetime
 import sys
+from logging import getLogger
+from libs.practical_funcs import TO_ANSI_COLORS, replace_color_code
+
+logger = getLogger(__name__)
 
 
 class SyncLoadingAnimation:
@@ -77,7 +87,7 @@ class SyncLoadingAnimation:
             # 显示当前点状态
             dots = "." * (dot_count % (max_dots + 1))
             sys.stdout.write(
-                f"\r{color}Wait{reset_color} {message}{dots}{time_str}")
+                f"\r{color}Wait{reset_color} {message}{time_str}{dots}        ")
             sys.stdout.flush()
 
             # 更新点数
@@ -110,12 +120,12 @@ class SyncLoadingAnimation:
 
             # 计算进度（循环显示）
             progress = (progress + 1) % (bar_length + 1)
-            bar = "█" * progress + "░" * (bar_length - progress)
+            barr = "█" * progress + "░" * (bar_length - progress)
             percentage = int((progress / bar_length) * 100)
 
             # 显示进度条
             sys.stdout.write(
-                f"\r{color}Wait{reset_color} {message} [{bar}] {percentage}%{time_str}")
+                f"\r{color}Wait{reset_color} {message} [{barr}] {percentage}%{time_str}")
             sys.stdout.flush()
 
             time.sleep(delay)
@@ -148,7 +158,8 @@ class SyncLoadingAnimation:
             # 显示当前状态
             current_suffix = suffixes[suffix_idx % len(suffixes)]
             sys.stdout.write(
-                f"\r{color}Wait{reset_color} {message}: {base_text}{current_suffix}{time_str}")
+                # 空格是把之前文字的刷掉
+                f"\r{color}Wait{reset_color} {message}: {base_text}{current_suffix}{time_str}        ")
             sys.stdout.flush()
 
             # 更新后缀
@@ -234,7 +245,7 @@ def show_loading_animation(animation_type: str = "spinner",
 
 
 def typewriter_effect(text: str,
-                      delay: float = 0.03,
+                      delay: float = 0.02,
                       newline_delay: float = 0.1,
                       on_char_typed: Optional[Callable] = None,
                       on_complete: Optional[Callable] = None) -> bool:
@@ -298,7 +309,7 @@ def typewriter_narrative(text: str,
                          suffix: str = "",
                          color: str = "",
                          reset_color: str = "\033[0m",
-                         delay: float = 0.02) -> bool:
+                         delay: float = 0.01) -> bool:
     """
     专门用于游戏叙述的打字机效果
 
@@ -314,6 +325,14 @@ def typewriter_narrative(text: str,
     """
     if prefix:
         print(prefix)
+    if color and color in TO_ANSI_COLORS:
+        color = TO_ANSI_COLORS[color]
+    if not color.startswith("\033[") or not reset_color.startswith("\033["):
+        logger.warning(
+            "[打字机动画]颜色代码 %s 或 %s 不是ANSI颜色代码，已重置为默认值",
+            color, reset_color)
+        color = ""
+        reset_color = ""
 
     # 添加颜色
     colored_text = f"{color}{text}{reset_color}" if color else text
@@ -321,8 +340,8 @@ def typewriter_narrative(text: str,
     # 使用打字机效果
     interrupted = typewriter_effect(
         colored_text,
-        delay=delay,  # 稍快的速度
-        newline_delay=0.1,
+        delay=delay,
+        newline_delay=0.05,
     )
 
     if suffix and not interrupted:
@@ -331,63 +350,52 @@ def typewriter_narrative(text: str,
     return interrupted
 
 
-def number_growth_animation(target_value: float,
-                            duration: float = 1.5,
-                            message: str = "检定中",
-                            color: str = "\033[93m",  # 黄色
-                            reset_color: str = "\033[0m") -> None:
+def display_narrative_with_typewriter(narr: str,
+                                      separator: str = "",
+                                      color: str = "") -> bool:
     """
-    数字增长动画，显示数字从0增长到目标值
+    增强版的叙述显示函数，带有打字机效果
 
     Args:
-        target_value: 目标数值
-        duration: 动画持续时间（秒）
-        message: 显示的消息
+        narr: 叙述文本
+        separator: 分隔线
         color: 颜色代码
-        reset_color: 颜色重置代码
+
+    Returns:
+        bool: 是否被用户中断
     """
-    current_value = 0.0
-    start_time = time.time()
-    end_time = start_time + duration
+    # 替换文本中的颜色代码为ANSI的
+    narr = replace_color_code(narr)
 
-    while time.time() < end_time:
-        elapsed = time.time() - start_time
-        progress = min(elapsed / duration, 1.0)
+    paras = narr.split("\n")
+    interrupted = False  # 这里关闭中断功能
 
-        # 非线性增长曲线（缓入缓出效果）
-        if progress < 0.8:
-            # 前80%快速增长
-            current_value = target_value * (progress / 0.8) ** 0.7
-        else:
-            # 后20%缓慢接近目标值
-            remaining_progress = (progress - 0.8) / 0.2
-            base_value = target_value * 0.8
-            increment = target_value * 0.2 * (remaining_progress ** 2)
-            current_value = base_value + increment
+    for para in paras:
+        if para.strip() and not interrupted:
+            para_interrupted = typewriter_narrative(
+                para.strip(),
+                color=TO_ANSI_COLORS.get(color, color),
+                suffix="\n"
+            )
+            if para_interrupted:
+                interrupted = True
+                break
 
-        # 确保不超过目标值
-        current_value = min(current_value, target_value)
+    if not interrupted:
+        print(separator)
 
-        # 显示当前数值（保留2位小数）
-        sys.stdout.write(
-            f"\r{color}🎲{reset_color} {message}: {current_value:.2f}/{target_value:.2f}")
-        sys.stdout.flush()
-
-        time.sleep(0.05)  # 50ms刷新一次
-
-    # 最终显示目标值
-    sys.stdout.write(
-        f"\r{color}🎲{reset_color} {message}: {target_value:.2f}/{target_value:.2f}")
-    sys.stdout.flush()
-    print()  # 换行
+    return interrupted
 
 
 def probability_check_animation(success_prob: float,
                                 target_prob: float,
                                 duration: float = 2.0,
+                                color_threshold: str = "\033[93m",  # 黄色
                                 color_success: str = "\033[92m",  # 绿色
                                 color_fail: str = "\033[91m",     # 红色
-                                reset_color: str = "\033[0m") -> None:
+                                color_bar: str = "\033[97m",      # 白色
+                                reset_color: str = "\033[0m",
+                                color_preset: int = 0) -> None:
     """
     概率检定动画，显示成功概率和实际结果的对比
 
@@ -395,15 +403,38 @@ def probability_check_animation(success_prob: float,
         success_prob: 实际成功概率
         target_prob: 目标成功概率
         duration: 动画持续时间（秒）
+        color_threshold: 阈值位置的颜色
         color_success: 成功时的颜色
         color_fail: 失败时的颜色
+        color_normal: 正常颜色
+        color_bar: 进度条颜色
         reset_color: 颜色重置代码
+        color_preset: 配色方案编号(1: 成功蓝色，失败黄色；2: 成功绿色，失败红色)
     """
+    # 配色方案预设
+    for i in [color_threshold, color_success, color_fail, color_bar]:
+        if i in TO_ANSI_COLORS:
+            i = TO_ANSI_COLORS[i]
+    if not all(color.startswith('\033[') or color.startswith('\x1b[') for color in [color_threshold, color_success, color_fail, color_bar]):
+        raise ValueError(
+            f"颜色代码必须以'\033['开头,这个动画不支持rich的颜色代码 |你的代码:{[i for i in [color_threshold, color_success, color_fail, color_bar] if not i.startswith('\033[') and not i.startswith('\x1b[')]}")
+    if color_preset == 1:  # 成功蓝色，失败黄色
+        color_success = "\033[94m"  # 蓝色
+        color_fail = "\033[93m"  # 黄色
+    elif color_preset == 2:  # 成功绿色，失败红色
+        color_success = "\033[92m"  # 绿色
+        color_fail = "\033[91m"  # 红色
+
     is_success = success_prob < target_prob
     result_color = color_success if is_success else color_fail
-    result_text = "成功" if is_success else "失败"
+    result_text = "✓ 成功" if is_success else "✗ 失败"
 
-    current_prob = 0.0
+    bar_length = 30
+    threshold_pos = int(target_prob * bar_length)
+
+    # 确保位置在合理范围内
+    threshold_pos = max(0, min(threshold_pos, bar_length))
+
     start_time = time.time()
     end_time = start_time + duration
 
@@ -411,20 +442,124 @@ def probability_check_animation(success_prob: float,
         elapsed = time.time() - start_time
         progress = min(elapsed / duration, 1.0)
 
-        # 非线性增长
-        if progress < 0.9:
-            current_prob = success_prob * (progress / 0.9) ** 0.5
+        # 使用缓动函数使当前概率从0增长到实际概率
+        t = progress
+        if t < 0.9:
+            # 缓动函数：先快后慢
+            current_prob = success_prob * (1 - (1 - (t / 0.9)) ** 3)
         else:
+            # 最后10%的时间微调到实际概率
             current_prob = success_prob
 
-        # 显示当前概率
-        sys.stdout.write(f"\r🎯 检定中: {current_prob:.2f}/{target_prob:.2f}")
+        # 根据当前概率计算填充长度
+        filled_length = int(bar_length * min(current_prob, 1.0))
+        filled_length = min(filled_length, bar_length)
+
+        # 构建进度条
+        d_bar = ""
+        for i in range(bar_length):
+            if i < threshold_pos:
+                # 阈值前的格子
+                if i < filled_length:
+                    # 已填充部分
+                    if current_prob <= target_prob:
+                        d_bar += f"{color_success}█{reset_color}"
+                    else:
+                        d_bar += f"{color_fail}█{reset_color}"
+                else:
+                    # 未填充部分
+                    if i == threshold_pos - 1 and threshold_pos < bar_length:
+                        d_bar += f"{color_threshold}║{reset_color}"
+                    else:
+                        d_bar += f"{color_bar}░{reset_color}"
+            else:
+                # 阈值后的格子
+                if i < filled_length:
+                    # 已填充部分
+                    if current_prob <= target_prob:
+                        d_bar += f"{color_success}█{reset_color}"
+                    else:
+                        d_bar += f"{color_fail}█{reset_color}"
+                else:
+                    # 未填充部分
+                    d_bar += f"{color_bar}░{reset_color}"
+
+        # 概率颜色
+        if current_prob <= target_prob:
+            prob_color = color_success
+        else:
+            prob_color = color_fail
+
+        # 清除行并输出
+        sys.stdout.write("\033[K")  # 清除当前行
+        # 显示当前概率值而不是时间进度
+        sys.stdout.write(
+            f"\r🎲 检定中: [{d_bar}] {prob_color}{current_prob:.3f}{reset_color}/{target_prob:.3f}")
         sys.stdout.flush()
 
-        time.sleep(0.06)  # 60ms刷新一次
+        time.sleep(0.05)
 
-    # 显示最终结果
-    sys.stdout.write(
-        f"\r{result_color}🎯 检定{result_text}: {success_prob:.2f}/{target_prob:.2f}{reset_color}")
+    # 最终进度条
+    final_filled_length = int(bar_length * min(success_prob, 1.0))
+    d_bar = ""
+    for i in range(bar_length):
+        if i < threshold_pos:
+            if i < final_filled_length:
+                # 已填充部分
+                if success_prob <= target_prob:
+                    d_bar += f"{color_success}█{reset_color}"
+                else:
+                    d_bar += f"{color_fail}█{reset_color}"
+            else:
+                # 未填充部分
+                if i == threshold_pos - 1 and threshold_pos < bar_length:
+                    d_bar += f"{color_threshold}║{reset_color}"
+                else:
+                    d_bar += f"{color_bar}░{reset_color}"
+        else:
+            if i < final_filled_length:
+                # 已填充部分
+                d_bar += f"{color_fail}█{reset_color}"
+            else:
+                # 未填充部分
+                d_bar += f"{color_bar}░{reset_color}"
+
+    # 最终显示
+    sys.stdout.write("\033[K")  # 清除当前行
+    sys.stdout.write(f"\r{result_color}{result_text}{reset_color}: ")
+    sys.stdout.write(f"[{d_bar}] ")
+    sys.stdout.write(f" {result_color}{success_prob:.3f}{reset_color}")
+    sys.stdout.write(f"/{target_prob:.3f}     ")  # 空格是把之前文字的刷掉
     sys.stdout.flush()
-    print()  # 换行
+    print()
+
+
+if __name__ == "__main__":
+    # print("各类动画测试")
+    # anime_loader = SyncLoadingAnimation()
+    # anime_loader.start_animation("spinner")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+    # anime_loader.start_animation("progress")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+    # anime_loader.start_animation("dots")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+    # anime_loader.start_animation("typewriter")
+    # time.sleep(2)
+    # anime_loader.stop_animation()
+
+    print("检定动画测试")
+    print("测试1：实际值0.48/0.51，目标值0.5")
+    probability_check_animation(0.51, 0.5, duration=1, color_preset=1)
+    probability_check_animation(0.48, 0.7, duration=1, color_preset=2)
+
+    print("\n测试2：实际值0.6，目标值0.5")
+    probability_check_animation(0.9, 0.5, duration=1)
+
+    print("\n测试3：实际值0.3，目标值0.5")
+    probability_check_animation(0.2, 0.5, duration=1)
+
+    print("\n测试4：实际值0，目标值0.01")
+    probability_check_animation(0, 0.01, duration=2)

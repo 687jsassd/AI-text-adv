@@ -1,111 +1,144 @@
+"""
+游戏主程序，用于进行游戏循环流程，进行显示等。
+"""
 # Copyright (c) 2025 [687jsassd]
 # MIT License
-import uuid
-import hashlib
+
+from typing import Tuple
 from datetime import datetime
 import json
 import os
+import gzip
+import sys
+import logging
+from collections import deque
+from rich import print
+from config import (LOG_DIR,
+                    CustomConfig)
+from libs.animes_rich import GameTitle, console
+from libs.event_manager import cmd_manager
+from libs.logger import init_global_logger, log_exceptions
+from libs.practical_funcs import (clear_screen,
+                                  COLOR_GREEN,
+                                  COLOR_RESET,
+                                  COLOR_RED,
+                                  COLOR_YELLOW,
+                                  COLOR_MAGENTA,
+                                  generate_game_id,
+
+                                  find_file_by_name,
+                                  text_colorize,
+                                  )
+from libs.animes import display_narrative_with_typewriter
 from game_engine import GameEngine
-from config import LOG_DIR, CURRENT_TIME, CustomConfig, COLOR_GREEN, COLOR_RESET, COLOR_RED, COLOR_YELLOW
-from animes import typewriter_narrative, show_loading_animation, SyncLoadingAnimation
+
+# 日志初始化
+init_global_logger()
+logger = logging.getLogger(__name__)
+
+
+if getattr(sys, 'frozen', False):
+    # 打包后：exe所在目录（处理符号链接/中文路径）
+    exe_path = os.path.abspath(sys.executable)
+    root_path = os.path.dirname(exe_path)
+else:
+    # 未打包：脚本所在目录（双击py时，__file__是绝对路径，不受CWD影响）
+    script_path = os.path.abspath(__file__)
+    root_path = os.path.dirname(script_path)
+# 强制切换工作目录到程序根目录
+os.chdir(root_path)
+
+
+VERSION = "0.1.7"
+
+
+# 额外数据，存储回合数等必要的需要持久化的信息
+class ExtraData:
+    """
+    引擎用，额外数据，存储回合数等必要的需要持久化的信息
+    """
+
+    def __init__(self):
+        self.turns = 0
+        self.think_count_remain = 0
+        self.skip_csmode_action_modify = False
+
+    def read_from_dict(self, extra_datas: dict):
+        """
+        从字典读取额外数据
+        """
+        self.turns = extra_datas.get("turns", 0)
+        self.think_count_remain = extra_datas.get("think_count_remain", 0)
+        self.skip_csmode_action_modify = extra_datas.get(
+            "skip_csmode_action_modify", False)
+
+    def to_dict(self) -> dict:
+        """
+        转换为字典
+        """
+        return {
+            "turns": self.turns,
+            "think_count_remain": self.think_count_remain,
+            "skip_csmode_action_modify": self.skip_csmode_action_modify,
+        }
+
 
 config = CustomConfig()
 
-VERSION = "0.1.6b"
 
-extra_datas = {
-    "turn": 0,
-    "think_count_remain": 0,
-}
-
-# 显示函数
-
-
-def display_narrative_with_typewriter(narr: str,
-                                      separator: str = "",
-                                      color: str = "") -> bool:
+# 保存游戏
+@log_exceptions(logger)
+def save_game(game_engine, extra_datas: ExtraData, save_name="autosave", is_manual_save=False):
     """
-    增强版的叙述显示函数，带有打字机效果
-
-    Args:
-        narr: 叙述文本
-        separator: 分隔线
-        color: 颜色代码
-
-    Returns:
-        bool: 是否被用户中断
+    保存游戏状态到文件（使用gzip压缩）
     """
-    print("\n" + separator)
-
-    paras = narr.split("\n")
-    interrupted = False  # 这里关闭中断功能
-
-    for para in paras:
-        if para.strip() and not interrupted:
-            para_interrupted = typewriter_narrative(
-                para.strip(),
-                color=color,
-                suffix="\n"
-            )
-            if para_interrupted:
-                interrupted = True
-                break
-
-    if not interrupted:
-        print(separator)
-
-    return interrupted
-
-
-def generate_game_id():
-    """生成8位字符的唯一游戏标识符"""
-    # 使用UUID和哈希生成8位唯一标识
-    unique_id = str(uuid.uuid4())
-    hash_object = hashlib.md5(unique_id.encode())
-    return hash_object.hexdigest()[:8]
-
-
-def save_game(game_engine, save_name="autosave", is_manual_save=False):
-    """
-    保存游戏状态到文件
-    """
+    if extra_datas is None:
+        extra_datas = ExtraData()
     try:
         # 创建保存目录
         save_dir = "saves"
         if not os.path.exists(save_dir):
+            logger.info("创建保存目录 %s", save_dir)
             os.makedirs(save_dir)
 
         # 获取或生成游戏ID
         if not game_engine.game_id:
             game_engine.game_id = generate_game_id()
+            logger.info("生成游戏ID %s", game_engine.game_id)
 
         # 创建游戏专属目录
         game_save_dir = os.path.join(save_dir, game_engine.game_id)
         if not os.path.exists(game_save_dir):
+            logger.info("创建游戏专属目录 %s", game_save_dir)
             os.makedirs(game_save_dir)
 
-        # 构建保存数据
         save_data = {
             "version": VERSION,
             "save_desc": save_name,
             "game_id": game_engine.game_id,
             "timestamp": datetime.now().isoformat(),
+            # 基础变量
             "player_name": game_engine.player_name,
             "player_story": game_engine.prompt_manager.prompts_sections.get("user_story", ""),
+            "current_response": game_engine.current_response,
             "current_description": game_engine.current_description,
             "current_options": game_engine.current_options,
             "current_game_status": game_engine.current_game_status,
             "history_descriptions": game_engine.history_descriptions,
             "history_choices": game_engine.history_choices,
             "history_simple_summaries": game_engine.history_simple_summaries,
-            "inventory": game_engine.inventory,
-            # "conversation_history": game_engine.conversation_history,
-            "total_turns": len(game_engine.history_descriptions),
+            "conversation_history": game_engine.conversation_history,
+            # 摘要压缩相关
+            "summary_conclude_val": game_engine.summary_conclude_val,
+            "conclude_summary_cooldown": game_engine.conclude_summary_cooldown,
+            # Token统计
             "total_prompt_tokens": game_engine.total_prompt_tokens,
             "last_prompt_tokens": game_engine.l_p_token,
             "total_completion_tokens": game_engine.total_completion_tokens,
             "last_completion_tokens": game_engine.l_c_token,
             "total_tokens": game_engine.total_tokens,
+            "token_consumes": game_engine.token_consumes,
+            # 自定义配置（保留）
             "custom_config": {
                 "max_tokens": game_engine.custom_config.max_tokens,
                 "temperature": game_engine.custom_config.temperature,
@@ -120,113 +153,172 @@ def save_game(game_engine, save_name="autosave", is_manual_save=False):
                 "custom_prompts": game_engine.custom_config.custom_prompts,
                 "api_provider_choice": game_engine.custom_config.api_provider_choice,
             },
-            "character_attributes": game_engine.character_attributes,
-            "situation_value": game_engine.situation,
-            "token_consumes": game_engine.token_consumes,
-            "extra_datas": extra_datas,
-            "item_repo": game_engine.item_repository,
-            "is_no_options": game_engine.prompt_manager.is_no_options,
+            # 拓展系统（序列化自定义类）
+            "attr_system": game_engine.attr_system.to_dict(),
+            "situation_system": game_engine.situation_system.to_dict(),
+            "item_system": game_engine.item_system.to_dict(),
+
+            # 其他拓展变量
+            "message_queue": list(game_engine.message_queue),
             "variables": game_engine.variables,
+            "prompt_manager_is_no_options": game_engine.prompt_manager.is_no_options,
+            "total_turns": len(game_engine.history_descriptions),
+            "extra_datas": extra_datas.to_dict(),
         }
 
         # 生成文件名
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         if is_manual_save:
-            filename = f"manual_{save_name}_{timestamp}.json"
+            filename = f"manual_{save_name}_{timestamp}.json.gz"
         else:
-            filename = f"{save_name}_{timestamp}.json"
+            filename = f"{save_name}_{timestamp}.json.gz"
         filepath = os.path.join(game_save_dir, filename)
+        logger.info("保存游戏数据到 %s", filepath)
 
-        # 保存到文件
-        with open(filepath, 'w', encoding='utf-8') as f:
+        # 保存到压缩文件（使用gzip.open，模式为wt：文本写入）
+        with gzip.open(filepath, 'wt', encoding='utf-8') as f:
             json.dump(save_data, f, ensure_ascii=False, indent=2)
+        logger.info("游戏数据保存完成")
 
         # 更新最新保存文件
-        latest_file = os.path.join(game_save_dir, f"{save_name}_latest.json")
-        with open(latest_file, 'w', encoding='utf-8') as f:
+        latest_file = os.path.join(
+            game_save_dir, f"{save_name}_latest.json.gz")
+        with gzip.open(latest_file, 'wt', encoding='utf-8') as f:
             json.dump(save_data, f, ensure_ascii=False, indent=2)
+        logger.info("最新保存文件 %s 更新完成", latest_file)
 
         # 如果不是手动保存，进行自动存档管理
         if not is_manual_save:
+            logger.info("自动保存-开始管理自动保存")
             manage_auto_saves(game_save_dir, save_name)
 
         return True, f"游戏已保存到 {game_engine.game_id}/{filename}"
 
     except Exception as e:  # type:ignore
+        logger.error("保存失败: %s", str(e))
         return False, f"保存失败: {str(e)}"
 
 
+@log_exceptions(logger)
 def manage_auto_saves(game_save_dir, save_name="autosave"):
-    """管理自动保存，只保留最近的10个存档"""
-    try:
-        # 获取所有自动保存文件
-        auto_save_files = [f for f in os.listdir(game_save_dir)
-                           if f.startswith(save_name) and f.endswith('.json')
-                           and not f.startswith('manual_') and not f.endswith('_latest.json')]
+    """管理自动保存，只保留最近的5个存档（兼容gzip压缩存档和旧版未压缩存档）"""
+    # 获取所有自动保存文件（同时匹配 .json 和 .json.gz 后缀）
+    auto_save_files = []
+    for f in os.listdir(game_save_dir):
+        # 过滤条件：
+        # 1. 以save_name开头 2. 不是手动存档 3. 不是latest文件 4. 后缀是.json或.json.gz
+        if (f.startswith(save_name) and
+            not f.startswith('manual_') and
+            not f.endswith('_latest.json') and
+            not f.endswith('_latest.json.gz') and
+                f.endswith(('.json', '.json.gz'))):
+            auto_save_files.append(f)
+    logger.info("找到了%s个自动保存文件", len(auto_save_files))
 
-        if len(auto_save_files) > 10:
-            # 按时间排序，删除最早的存档
-            auto_save_files.sort()  # 文件名包含时间戳，排序后最早的在前
-            files_to_delete = auto_save_files[:-10]  # 保留最后10个
+    if len(auto_save_files) > 5:
+        # 按时间戳排序（文件名包含时间戳，排序后最早的在前）
+        # 排序逻辑：提取文件名中的时间戳部分进行比较，确保排序准确
+        def get_file_timestamp(filename):
+            # 提取时间戳（格式：YYYYMMDD_HHMMSS）
+            # 文件名格式：save_name_YYYYMMDD_HHMMSS.json(.gz)
+            parts = filename.replace(
+                '.json', '').replace('.gz', '').split('_')
+            # 找到时间戳部分（长度为15：YYYYMMDD_HHMMSS）
+            for part in parts:
+                if len(part) == 15 and part[:8].isdigit() and part[9:].isdigit():
+                    return part
+            return filename  # 兜底：用原文件名排序
 
-            for filename in files_to_delete:
-                filepath = os.path.join(game_save_dir, filename)
-                os.remove(filepath)
+        auto_save_files.sort(key=get_file_timestamp)
+        files_to_delete = auto_save_files[:-5]  # 保留最后5个
 
-    except Exception as e:  # type:ignore
-        print(f"自动存档管理失败: {e}")
+        for filename in files_to_delete:
+            filepath = os.path.join(game_save_dir, filename)
+            os.remove(filepath)
+            logger.info("自动删除旧存档: %s", filepath)
 
 
-def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
+# 读取存档
+@log_exceptions(logger)
+def load_game(game_engine, extra_datas: ExtraData, save_name="autosave", filename=None, game_id=None):
     """
-    从文件加载游戏状态
+    从文件加载游戏状态（适配gzip压缩存档，也兼容json存档）
     """
-    global extra_datas
     try:
         save_dir = "saves"
-
         if not os.path.exists(save_dir):
-            return False, 0, "没有找到保存文件目录"
+            logger.info("没有找到保存文件目录")
+            return False, "没有找到保存文件目录"
 
         # 确定要加载的文件
         if filename and game_id:
-            # 直接指定游戏ID和文件名
-            filepath = os.path.join(save_dir, game_id, filename)
+            # 兼容手动指定的文件名（自动补全.gz后缀）
+            if not filename.endswith(('.json', '.json.gz')):
+                filepath = os.path.join(
+                    save_dir, game_id, f"{filename}.json.gz")
+            else:
+                filepath = os.path.join(save_dir, game_id, filename)
         elif filename:
-            # 查找包含该文件名的游戏目录
-            filepath = find_save_file_by_name(save_dir, filename)
+            filepath = find_file_by_name(save_dir, filename)
             if not filepath:
-                return False, 0, f"没有找到保存文件 {filename}"
+                # 尝试查找压缩版本
+                filepath = find_file_by_name(save_dir, f"{filename}.gz")
+                if not filepath:
+                    return False, f"没有找到保存文件 {filename}（含压缩版本）"
         else:
-            # 加载最新的保存
             if game_id:
-                # 指定游戏ID的最新保存
                 game_save_dir = os.path.join(save_dir, game_id)
                 if not os.path.exists(game_save_dir):
-                    return False, 0, f"没有找到游戏 {game_id} 的保存目录"
+                    return False, f"没有找到游戏 {game_id} 的保存目录"
+                # 优先查找压缩版最新存档
                 filepath = os.path.join(
-                    game_save_dir, f"{save_name}_latest.json")
+                    game_save_dir, f"{save_name}_latest.json.gz")
+                # 如果没有压缩版，尝试旧版未压缩
+                if not os.path.exists(filepath):
+                    filepath = os.path.join(
+                        game_save_dir, f"{save_name}_latest.json")
             else:
-                # 查找所有游戏的最新保存
                 filepath = find_latest_save(save_dir, save_name)
                 if not filepath:
-                    return False, 0, f"没有找到 {save_name} 的保存文件"
+                    # 尝试查找压缩版
+                    filepath = find_latest_save(save_dir, f"{save_name}.gz")
+                    if not filepath:
+                        return False, f"没有找到 {save_name} 的保存文件（含压缩版本）"
 
         if not os.path.exists(filepath):
-            return False, 0, f"保存文件不存在: {filepath}"
+            logger.info("保存文件不存在: %s", filepath)
+            return False, f"保存文件不存在: {filepath}"
 
-        # 读取保存数据
-        with open(filepath, 'r', encoding='utf-8') as f:
-            save_data = json.load(f)
+        # 读取保存数据（兼容压缩/未压缩）
+        save_data = None
+        if filepath.endswith('.gz'):
+            # 读取gzip压缩文件
+            with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                save_data = json.load(f)
+            logger.info("成功读取压缩存档: %s", filepath)
+        else:
+            # 读取旧版未压缩文件
+            with open(filepath, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+            logger.info("成功读取未压缩存档: %s", filepath)
 
-        # 恢复游戏状态
+        # 版本检查
         if save_data["version"] != VERSION:
+            logger.warning("存档版本不匹配: 存档版本 %s, 游戏版本 %s",
+                           save_data["version"], VERSION)
             tmp = input(
-                f"\n[警告]:不匹配的版本号(存档{save_data['version']} -- 游戏{VERSION})\n 强制读取？(y/n)")
+                f"\n[警告]:最新存档具有不匹配的版本号(存档{save_data['version']} -- 游戏{VERSION})\n 强制读取？(y/n)")
             if tmp.lower() != "y":
-                return False, 0, "版本号不匹配"
+                return False, "版本号不匹配"
+            else:
+                logger.warning("强制读取存档")
+
+        # 恢复基础变量
+        extra_datas.read_from_dict(save_data["extra_datas"])
         game_engine.game_id = save_data["game_id"]
         game_engine.player_name = save_data["player_name"]
+        game_engine.current_response = save_data.get(
+            "current_response", "")
         game_engine.prompt_manager.prompts_sections["user_story"] = save_data["player_story"]
         game_engine.current_description = save_data["current_description"]
         game_engine.current_options = save_data["current_options"]
@@ -234,22 +326,22 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
         game_engine.history_descriptions = save_data["history_descriptions"]
         game_engine.history_choices = save_data["history_choices"]
         game_engine.history_simple_summaries = save_data["history_simple_summaries"]
-        game_engine.inventory = save_data["inventory"]
-        # game_engine.conversation_history = save_data["conversation_history"]
+        game_engine.conversation_history = save_data["conversation_history"]
+
+        # 恢复摘要压缩相关
+        game_engine.summary_conclude_val = save_data.get(
+            "summary_conclude_val", 24)
+        game_engine.conclude_summary_cooldown = save_data["conclude_summary_cooldown"]
+
+        # 恢复Token统计
         game_engine.total_prompt_tokens = save_data["total_prompt_tokens"]
         game_engine.l_p_token = save_data["last_prompt_tokens"]
         game_engine.total_completion_tokens = save_data["total_completion_tokens"]
         game_engine.l_c_token = save_data["last_completion_tokens"]
         game_engine.total_tokens = save_data["total_tokens"]
-        game_engine.character_attributes = save_data["character_attributes"]
-        game_engine.situation = save_data["situation_value"]
         game_engine.token_consumes = save_data["token_consumes"]
-        game_engine.item_repository = save_data["item_repo"]
-        extra_datas = save_data["extra_datas"]
-        game_engine.prompt_manager.is_no_options = save_data["is_no_options"]
-        game_engine.variables = save_data["variables"]
 
-        # 恢复配置
+        # 恢复自定义配置
         config_data = save_data["custom_config"]
         game_engine.custom_config.max_tokens = config_data["max_tokens"]
         game_engine.custom_config.temperature = config_data["temperature"]
@@ -265,120 +357,165 @@ def load_game(game_engine, save_name="autosave", filename=None, game_id=None):
         if "api_provider_choice" in config_data:
             game_engine.custom_config.api_provider_choice = config_data["api_provider_choice"]
 
+        # 恢复拓展系统
+        game_engine.attr_system.from_dict(
+            save_data["attr_system"])
+        game_engine.situation_system.from_dict(
+            save_data["situation_system"])
+        game_engine.item_system.from_dict(
+            save_data["item_system"])
+
+        # 恢复其他拓展变量
+        game_engine.message_queue = deque(
+            save_data["message_queue"])
+        game_engine.variables = save_data["variables"]
+        game_engine.prompt_manager.is_no_options = save_data["prompt_manager_is_no_options"]
+
+        # 格式化时间并返回结果
         timestamp = datetime.fromisoformat(
             save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
-        return True, save_data['total_turns'], f"游戏已加载 (游戏ID: {save_data['game_id']}, 保存时间: {timestamp})"
+        logger.info("成功加载存档: 游戏ID %s, 保存时间 %s",
+                    save_data['game_id'], timestamp)
+        return True, f"游戏已加载 (游戏ID: {save_data['game_id']}, 保存时间: {timestamp})"
 
     except Exception as e:  # type:ignore
-        return False, 0, f"加载失败: {str(e)}"
+        logger.error("加载存档时发生错误: %s", str(e))
+        return False, f"加载失败: {str(e)}"
 
 
-def find_save_file_by_name(save_dir, filename):
-    """根据文件名查找保存文件"""
+@log_exceptions(logger)
+def find_latest_save(save_dir, save_name="autosave", include_manual=False):
+    """查找所有游戏中最新的存档文件"""
+    all_candidates = []
+    added_files = set()
+    logger.info("查找最新存档 | 根目录: %s | 前缀: %s", save_dir, save_name)
+
+    if not os.path.exists(save_dir):
+        logger.error("存档目录不存在: %s", save_dir)
+        return None
+
+    # 遍历所有游戏目录收集候选
     for game_id in os.listdir(save_dir):
         game_save_dir = os.path.join(save_dir, game_id)
-        if os.path.isdir(game_save_dir):
-            filepath = os.path.join(game_save_dir, filename)
-            if os.path.exists(filepath):
-                return filepath
-    return None
+        if not os.path.isdir(game_save_dir):
+            continue
 
-
-def find_latest_save(save_dir, save_name="autosave"):
-    """查找所有游戏中最新的保存文件"""
-    latest_save = None
-    latest_time = None
-
-    for game_id in os.listdir(save_dir):
-        game_save_dir = os.path.join(save_dir, game_id)
-        if os.path.isdir(game_save_dir):
-            latest_file = os.path.join(
-                game_save_dir, f"{save_name}_latest.json")
-            if os.path.exists(latest_file):
-                try:
-                    with open(latest_file, 'r', encoding='utf-8') as f:
-                        save_data = json.load(f)
+        # 处理latest文件
+        latest_file = os.path.join(
+            game_save_dir, f"{save_name}_latest.json.gz")
+        if os.path.exists(latest_file) and latest_file not in added_files:
+            try:
+                with gzip.open(latest_file, 'rt', encoding='utf-8') as f:
+                    save_data = json.load(f)
+                if "timestamp" in save_data:
                     save_time = datetime.fromisoformat(save_data["timestamp"])
-                    if latest_time is None or save_time > latest_time:
-                        latest_time = save_time
-                        latest_save = latest_file
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    print(f"解析保存文件时出错: {e}, 文件: {latest_file}")
-                    continue
+                    # 优先找实际存档
+                    ts_str = datetime.fromisoformat(
+                        save_data["timestamp"]).strftime("%Y%m%d_%H%M%S")
+                    actual_file = os.path.join(
+                        game_save_dir, f"{save_name}_{ts_str}.json.gz")
+                    if os.path.exists(actual_file) and actual_file not in added_files:
+                        all_candidates.append((save_time, actual_file))
+                        added_files.add(actual_file)
+                    else:
+                        all_candidates.append((save_time, latest_file))
+                        added_files.add(latest_file)
+            except Exception as e:
+                logger.error("解析latest文件失败: %s | %s", latest_file, e)
 
-    return latest_save
+        # 处理实际存档文件
+        for filename in os.listdir(game_save_dir):
+            filepath = os.path.join(game_save_dir, filename)
+            if (filepath in added_files or not filename.endswith(".json.gz") or
+                filename.endswith("_latest.json.gz") or
+                    not (filename.startswith(f"{save_name}_") or (include_manual and filename.startswith(f"manual_{save_name}_")))):
+                continue
+
+            try:
+                with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                    save_data = json.load(f)
+                if "timestamp" in save_data:
+                    save_time = datetime.fromisoformat(save_data["timestamp"])
+                    all_candidates.append((save_time, filepath))
+                    added_files.add(filepath)
+            except Exception as e:
+                logger.error("解析存档失败: %s | %s", filepath, e)
+
+    # 全局排序找最新
+    if all_candidates:
+        all_candidates.sort(key=lambda x: x[0], reverse=True)
+        latest_time, latest_save = all_candidates[0]
+        logger.info("最新存档: %s | 时间: %s", latest_save,
+                    latest_time.strftime('%Y-%m-%d %H:%M:%S'))
+        return latest_save
+    else:
+        logger.warning("未找到有效存档")
+        return None
 
 
+# 列出所有保存文件
+@log_exceptions(logger)
 def list_saves():
     """
-    列出所有保存文件，按游戏ID分类
+    列出所有保存文件（兼容gzip压缩存档和旧版未压缩存档），按游戏ID分类
     """
-    try:
-        save_dir = "saves"
-        if not os.path.exists(save_dir):
-            return []
+    save_dir = "saves"
+    if not os.path.exists(save_dir):
+        return []
 
-        save_info = []
+    save_info = []
 
-        # 遍历所有游戏目录
-        for game_id in os.listdir(save_dir):
+    # 遍历所有游戏目录
+    for game_id in os.listdir(save_dir):
+        try:
             game_save_dir = os.path.join(save_dir, game_id)
             if not os.path.isdir(game_save_dir):
                 continue
 
-            # 获取该游戏的所有保存文件
-            save_files = [f for f in os.listdir(
-                game_save_dir) if f.endswith('.json')]
+            # 获取该游戏的所有保存文件（同时匹配 .json 和 .json.gz 后缀）
+            save_files = [
+                f for f in os.listdir(game_save_dir)
+                if f.endswith(('.json', '.json.gz'))  # 兼容两种格式
+                and not f.startswith('.')  # 排除隐藏文件
+            ]
 
             for filename in save_files:
                 filepath = os.path.join(game_save_dir, filename)
-                try:
+                # 根据文件后缀选择读取方式
+                if filename.endswith('.gz'):
+                    # 读取gzip压缩文件
+                    with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                        save_data = json.load(f)
+                else:
+                    # 读取旧版未压缩文件
                     with open(filepath, 'r', encoding='utf-8') as f:
                         save_data = json.load(f)
-                    timestamp = datetime.fromisoformat(
-                        save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
-                    save_desc = save_data.get("save_desc", "autosave")
-                    save_info.append({
-                        "game_id": game_id,
-                        "filename": filename,
-                        "player_name": save_data["player_name"],
-                        "timestamp": timestamp,
-                        "total_turns": save_data["total_turns"],
-                        "save_type": "manual" if filename.startswith("manual_") else "auto",
-                        "save_desc": save_desc,
-                        "ver": save_data["version"],
-                    })
-                except:
-                    continue
 
-        # 按时间排序
-        save_info.sort(key=lambda x: x["timestamp"], reverse=True)
-        return save_info
+                # 解析存档信息
+                timestamp = datetime.fromisoformat(
+                    save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+                save_desc = save_data.get("save_desc", "autosave")
+                save_info.append({
+                    "game_id": game_id,
+                    "filename": filename,
+                    "player_name": save_data["player_name"],
+                    "timestamp": timestamp,
+                    "total_turns": save_data["total_turns"],
+                    "save_type": "manual" if filename.startswith("manual_") else "auto",
+                    "save_desc": save_desc,
+                    "ver": save_data["version"],
+                    "file_format": "gzip" if filename.endswith('.gz') else "plain"
+                })
+        except Exception as e:
+            logger.error("解析存档 %s 失败: %s", game_id, e)
+            continue
 
-    except Exception as e:  # type:ignore
-        print(f"列出保存文件时出错: {e}")
-        return []
+    save_info.sort(key=lambda x: x["timestamp"], reverse=True)
+    return save_info
 
-
-def delete_save(game_id, filename):
-    """
-    删除指定的保存文件
-    """
-    try:
-        filepath = os.path.join("saves", game_id, filename)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            return True, f"保存文件 {game_id}/{filename} 已删除"
-        else:
-            return False, f"保存文件 {game_id}/{filename} 不存在"
-
-    except Exception as e:  # type:ignore
-        return False, f"删除失败: {str(e)}"
 
 # 手动保存函数（供用户调用）
-
-
-def manual_save(game_engine):
+def manual_save(game_engine, extra_datas: ExtraData):
     """
     手动保存游戏，允许用户输入保存名称
     """
@@ -386,79 +523,148 @@ def manual_save(game_engine):
     if not save_name:
         save_name = "manual_save"
 
-    success, message = save_game(game_engine, save_name, is_manual_save=True)
+    success, message = save_game(
+        game_engine, extra_datas, save_name, is_manual_save=True)
     print(message)
     return success
 
+
 # 手动加载函数（供用户调用）
-
-
-def manual_load(game_engine):
+def manual_load(game_engine, extra_datas: ExtraData):
     """
-    手动加载游戏，显示保存列表供用户选择
+    手动加载游戏，分两级选择：
+    1. 先选择游戏ID（其他游戏ID优先，当前游戏ID在最后）
+    2. 再选择该游戏ID下的具体存档
     """
-    saves = list_saves()
-    if not saves:
+    # 获取所有存档数据
+    all_saves = list_saves()
+    if not all_saves:
         print("没有找到保存文件")
-        return False, 0
+        return False, extra_datas
 
-    print("\n可用的保存文件 (按游戏ID分类):")
-    for i, save in enumerate(saves, 1):
-        save_type = "手动" if save['save_type'] == 'manual' else "自动"
+    current_game_id = getattr(game_engine, "game_id", None)
+    if not current_game_id:
+        print("无法获取当前游戏ID，将显示所有存档")
+        current_game_id = ""
+
+    # 分离当前游戏ID的存档和其他游戏ID的存档
+    current_saves = [s for s in all_saves if s["game_id"] == current_game_id]
+    other_saves = [s for s in all_saves if s["game_id"] != current_game_id]
+
+    # 提取其他游戏ID的唯一值并去重
+    other_game_ids = sorted(
+        list(set([s["game_id"] for s in other_saves])), reverse=False)
+
+    # 构建第一级选择菜单（游戏ID选择）
+    print("\n===== 选择游戏存档组 =====")
+    # 1. 显示其他游戏ID
+    for i, game_id in enumerate(other_game_ids, 1):
+        # 统计该ID下的存档数量
+        save_count = len([s for s in other_saves if s["game_id"] == game_id])
+        print(f"{i}. 游戏ID: {game_id} (存档数量: {save_count})")
+
+    # 2. 显示当前游戏ID选项（如果有当前ID且有存档）
+    current_option_idx = len(other_game_ids) + 1
+    if current_game_id and current_saves:
         print(
-            f"{i}.{save['game_id']}{'-'+save['save_desc']if save['save_desc'] != 'autosave' else ''}-{save['player_name']}-回合{save['total_turns']}-{save_type}{'-'+COLOR_YELLOW+"不匹配的游戏版本"+save['ver']+COLOR_RESET if save['ver'] != VERSION else ''}")
+            f"{current_option_idx}. 当前游戏ID: {current_game_id} (存档数量: {len(current_saves)})")
+    elif current_game_id and not current_saves:
+        print(f"{current_option_idx}. 当前游戏ID: {current_game_id} (无存档)")
 
+    # 3. 取消选项
+    cancel_idx = len(other_game_ids) + (1 if current_game_id else 0) + 1
+    print(f"{cancel_idx}. 取消")
+
+    # 处理第一级选择（游戏ID选择）
     try:
-        choice = input("选择要加载的存档编号（输入0取消）: ")
-        if choice == "0":
-            return False, 0
+        first_choice = input(f"\n请选择存档组编号（1-{cancel_idx}）: ")
+        if first_choice == str(cancel_idx):  # 取消
+            return False, extra_datas
 
-        choice_idx = int(choice) - 1
-        if 0 <= choice_idx < len(saves):
-            selected_save = saves[choice_idx]
-            success, turns, message = load_game(
-                game_engine, filename=selected_save["filename"], game_id=selected_save["game_id"])
+        first_choice_idx = int(first_choice)
+
+        # 校验选择范围
+        max_valid_idx = len(other_game_ids) + (1 if current_game_id else 0)
+        if first_choice_idx < 1 or first_choice_idx > max_valid_idx:
+            print("无效的选择编号")
+            return False, extra_datas
+
+        # 确定选中的游戏ID
+        selected_game_id = ""
+        if first_choice_idx <= len(other_game_ids):
+            # 选择了其他游戏ID
+            selected_game_id = other_game_ids[first_choice_idx - 1]
+        else:
+            # 选择了当前游戏ID
+            selected_game_id = current_game_id
+
+        # 筛选该游戏ID下的所有存档
+        target_saves = [
+            s for s in all_saves if s["game_id"] == selected_game_id]
+        if not target_saves:
+            print(f"游戏ID {selected_game_id} 下无可用存档")
+            return False, extra_datas
+
+        # 构建第二级选择菜单（具体存档选择）
+        print(f"\n===== 选择 {selected_game_id} 的具体存档 =====")
+        for i, save in enumerate(target_saves, 1):
+            save_type = "手动" if save['save_type'] == 'manual' else "自动"
+            version_warn = (
+                f"{COLOR_YELLOW}不匹配的游戏版本{save['ver']}{COLOR_RESET}"
+                if save['ver'] != VERSION else ""
+            )
+            save_desc = f"-{save['save_desc']}" if save['save_desc'] != 'autosave' else ""
+            print(
+                f"{i}. {save['game_id']}{save_desc}-{save['player_name']}-回合{save['total_turns']}-{save_type} {version_warn}"
+                f" (存档时间: {save['timestamp']})"
+            )
+
+        # 处理第二级选择（具体存档）
+        second_choice = input("\n选择要加载的存档编号（输入0取消）: ")
+        if second_choice == "0":
+            return False, extra_datas
+
+        second_choice_idx = int(second_choice) - 1
+        if 0 <= second_choice_idx < len(target_saves):
+            selected_save = target_saves[second_choice_idx]
+            success, message = load_game(
+                game_engine, extra_datas,
+                filename=selected_save["filename"],
+                game_id=selected_save["game_id"]
+            )
             if success:
                 print(message)
-                return success, turns
+                return success, extra_datas
             else:
                 print(message)
-                return False, 0
+                return False, extra_datas
         else:
-            print("无效的选择")
-            return False, 0
+            print("无效的存档编号")
+            return False, extra_datas
+
     except ValueError:
         print("请输入有效的数字")
-        return False, 0
+        return False, extra_datas
+    except Exception as e:
+        print(f"加载存档过程中出错: {e}")
+        if logger:
+            logger.error("手动加载存档失败", exc_info=e)
+        return False, extra_datas
 
 
-def clear_screen():
-    """
-    清空控制台屏幕
-    """
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-
-def display_narrative(narr: str):
-    """
-    打字机效果显示剧情文本
-    """
-    return display_narrative_with_typewriter(narr)
-
-
+# 显示游戏选项(必须件)
 def display_options(game: GameEngine):
     """
     显示游戏选项
     """
     if game.prompt_manager.is_no_options:
-        print("输入help 查看帮助")
-        print('-'*30)
+        console.rule(style="bold blue")
         return
-    has_danger, has_event, has_goods = False, False, False
-    options, chara_attrs, situation = game.current_options, game.character_attributes, game.situation
+    has_impossible, has_danger, has_event, has_goods = False, False, False, False
+    options, chara_attrs, situation = game.current_options, game.attr_system.attributes, game.situation_system.situation
     print("\n" + "你准备：")
     for opt in options:
-        print(f"{opt['id']}. {opt['text']}", end="")
+        print(f"{opt['id']}. {text_colorize(opt['text'])}", end="")
         fix_value = (chara_attrs.get(
             opt["main_factor"], 0)-opt["difficulty"])*3/2000
         # 处理形势
@@ -468,13 +674,13 @@ def display_options(game: GameEngine):
             fix_value += 0.04*situation
         if opt["type"] == "check":
             # 根据几率来添加不同提示
-            if opt["probability"] < 0.05-fix_value:
+            if opt["probability"] < 0.1-fix_value:
                 print(f"[{COLOR_RED}✘{COLOR_RESET}]")
+                has_impossible = True
+            elif opt["probability"] < 0.3-fix_value:
+                print(f"[{COLOR_MAGENTA}!{COLOR_RESET}]")
                 has_danger = True
-            elif opt["probability"] < 0.25-fix_value:
-                print(f"[{COLOR_RED}!{COLOR_RESET}]")
-                has_danger = True
-            elif opt["probability"] < 0.70-fix_value:
+            elif opt["probability"] < 0.65-fix_value:
                 print(f"[{COLOR_YELLOW}?{COLOR_RESET}]")
                 has_event = True
             else:
@@ -489,261 +695,131 @@ def display_options(game: GameEngine):
                     f"{COLOR_RED}[✘ {opt['main_factor']}≥{opt['difficulty']}]{COLOR_RESET}")
         else:
             print()
-
+    if has_impossible:
+        print(f"{COLOR_RED}[✘]极难检定{COLOR_RESET}")
     if has_danger:
-        print(f"[{COLOR_RED}✘ !{COLOR_RESET}] {COLOR_RED}困难检定{COLOR_RESET}")
+        print(f"{COLOR_MAGENTA}[!]困难检定{COLOR_RESET}")
     if has_event:
-        print(f"[{COLOR_YELLOW}?{COLOR_RESET}] {COLOR_YELLOW}中等检定{COLOR_RESET}")
+        print(f"{COLOR_YELLOW}[?]中等检定{COLOR_RESET}")
     if has_goods:
-        print(f"[{COLOR_GREEN}▲{COLOR_RESET}] {COLOR_GREEN}简单检定{COLOR_RESET}")
+        print(f"{COLOR_GREEN}[▲]简单检定{COLOR_RESET}")
     print("输入help 查看帮助")
-    print('-'*30)
+    console.rule(style="bold blue")
 
 
-def get_user_input_and_go(game: GameEngine):
+# 自定义行动的处理(必须件)
+def custom_action_func(game: GameEngine, extra_datas: ExtraData, skip_inputs: Tuple = ('help',)):
+    """
+    自定义行动
+    """
+    print(f"输入 /指令 以使用指令,如/help\n {COLOR_YELLOW}你决定{COLOR_RESET}")
+    custom_action = input(
+        "::")
+    if custom_action in skip_inputs:
+        print(f"{COLOR_RED}提示：为了避免误输入，建议使用 /+指令 来进行指令{COLOR_RESET}\n指令将继续执行，按任意键继续")
+        input()
+        return custom_action
+    if custom_action.startswith('/'):
+        cmd_input = custom_action[1:]
+        if cmd_input in skip_inputs:
+            return cmd_input
+        else:
+            print("无效指令")
+    else:
+        if custom_action.strip() == "" or game.go_game(custom_action, is_custom=True, is_skip_csmode_action_modify=extra_datas.skip_csmode_action_modify) == -1:
+            print("自定义行动无效/取消")
+    return custom_action
+
+
+# 获取用户输入并执行游戏操作(必须件)
+def get_user_input_and_go(game: GameEngine, extra_datas: ExtraData, skip_inputs: Tuple = ('help',)):
     """
     获取用户输入并执行游戏操作
     """
     while True:
-        loader = show_loading_animation("dot", message="整理中")
-        loader.stop_animation()  # type:ignore
+        if game.prompt_manager.is_no_options:
+            custom_action = custom_action_func(game, extra_datas, skip_inputs)
+            if custom_action:
+                return custom_action
+            else:
+                continue
+        game.anime_loader.stop_animation()
         user_input = input(":: ")
-        if user_input in ['exit', 'vars', 'setvar', 'delvar', 'csmode', 'opi', 'think', 'inv', 'attr', 'conclude_summary', 'help', 'summary', 'save', 'load', 'new', 'config', 'show_init_resp', 'fix_item_name', 'ana_token']:
+        if user_input == "custom":
+            custom_action = custom_action_func(game, extra_datas, skip_inputs)
+            if custom_action:
+                return custom_action
+            else:
+                continue
+        if user_input in skip_inputs:
             return user_input
         if user_input.isdigit() and 1 <= int(user_input) <= len(game.current_options):
-            display_narrative(
-                game.current_options[int(user_input)-1]['next_preview'])
-        if user_input == "custom" or game.prompt_manager.is_no_options:
-            custom_action = input("你决定 (输入空内容以取消,输入0以使用刚刚输入的内容作为行动)：")
-            if custom_action == "0":
-                custom_action = user_input
-            if custom_action.strip() == "" or game.go_game(custom_action, is_custom=True) == -1:
-                print("自定义行动无效")
-                continue
-            return custom_action
+            display_narrative_with_typewriter(
+                text_colorize(game.current_options[int(user_input)-1]['next_preview']))
         if not user_input.isdigit() or game.go_game(user_input) == -1:
             print("无效的选项ID，请重新输入。")
             continue
         return user_input
 
 
+# 打印游戏历史记录(集成到主循环中)
 def print_all_history(game: GameEngine, back_range: int = 50):
     """
-    打印游戏历史记录
+    打印游戏历史记录（排除当前局，仅显示历史局；超过back_range时取最后back_range条历史）
     """
-    for turn, desc, choice in zip(range(1, len(game.history_descriptions[-back_range:])+1), game.history_descriptions[-back_range:], game.history_choices[-back_range:]):
-        print(f"{turn}:")
-        print(desc)
-        print(choice)
-        print("\n" + '-'*40)
+    total_turns = len(game.history_descriptions)
+    history_descs = game.history_descriptions[:-1] if total_turns > 0 else []
+    history_choices = game.history_choices
+    recent_descs = history_descs[-back_range:] if history_descs else []
+    recent_choices = history_choices[-back_range:] if history_choices else []
+    start_turn = len(history_descs) - len(recent_descs) + \
+        1 if history_descs else 0
+    for idx, (desc, choice) in enumerate(zip(recent_descs, recent_choices)):
+        real_turn = start_turn + idx
+        print(f"{real_turn}:")
+        print(text_colorize(desc))
+        print(f"{COLOR_YELLOW}我选择:{COLOR_RESET}", text_colorize(choice))
+        console.rule(style="white")
 
 
-def config_game():
-    """
-    配置游戏参数
-    """
-    is_exit = False
-    while not is_exit:
-        try:
-            clear_screen()
-            print("输入你想要配置的参数:")
-            print(f"1.最大输出Token [{config.max_tokens}]")
-            print(f"2.温度 [{config.temperature}]")
-            print(f"3.频率惩罚 [{config.frequency_penalty}]")
-            print(f"4.存在惩罚 [{config.presence_penalty}]")
-            print(f"5.玩家姓名 [{config.player_name}]")
-            print(f"6.玩家故事 [{config.player_story}]")
-            print(f"7.偏好:色情 [{config.frequency_reflect[config.porn_value]}]")
-            print(
-                f"8.偏好:特别暴力 [{config.frequency_reflect[config.violence_value]}]")
-            print(f"9.偏好:血腥 [{config.frequency_reflect[config.blood_value]}]")
-            print(
-                f"10.偏好:恐怖 [{config.frequency_reflect[config.horror_value]}]")
-            print(f"11.自定义附加提示词 [{config.custom_prompts}]")
-            current_provider = config.get_current_provider()
-            print(f"12.API提供商 [{current_provider.get('name', '未配置')}]")
-            print(f"   - 模型: {current_provider.get('model', '')}")
-            print(f"   - api地址: {current_provider.get('base_url', '')}")
-            print("exit. 退出配置(完成配置)")
-
-            while True:
-                choice = input("输入你想要配置的参数ID：")
-                if choice == "exit":
-                    is_exit = True
-                    config.save_to_file()
-                    break
-                if choice.isdigit() and 1 <= int(choice) <= 12:
-                    choice = int(choice)
-                    if choice == 1:
-                        config.max_tokens = int(input("输入最大输出Token数："))
-                    elif choice == 2:
-                        config.temperature = float(input("输入温度："))
-                    elif choice == 3:
-                        config.frequency_penalty = float(input("输入频率惩罚："))
-                    elif choice == 4:
-                        config.presence_penalty = float(input("输入存在惩罚："))
-                    elif choice == 5:
-                        config.player_name = input("输入玩家姓名：")
-                    elif choice == 6:
-                        config.player_story = input("输入玩家故事：")
-                    elif choice == 7:
-                        config.porn_value = int(input("输入色情偏好（0-5）："))
-                    elif choice == 8:
-                        config.violence_value = int(input("输入特别暴力偏好（0-5）："))
-                    elif choice == 9:
-                        config.blood_value = int(input("输入血腥偏好（0-5）："))
-                    elif choice == 10:
-                        config.horror_value = int(input("输入恐怖偏好（0-5）："))
-                    elif choice == 11:
-                        config.custom_prompts = input("输入自定义附加提示词：")
-                    elif choice == 12:
-                        print("可用API提供商:")
-                        for key, provider in config.api_providers.items():
-                            print(
-                                f"{key}. {provider['name']} (模型: {provider['model']})")
-                        config.api_provider_choice = int(input("输入提供商ID："))
-
-                    break
-                else:
-                    print("无效的选项ID，请重新输入。")
-                    continue
-        except ValueError:
-            input("输入无效")
-            continue
+# 显示物品/变量数警告(已集成到主循环中)
+def show_item_var_caution(game: GameEngine):
+    """如果物品数/变量数超过35.分别提醒用户注意token消耗和适用性"""
+    if len(game.item_system.inventory) > 35:
+        print(COLOR_YELLOW +
+              f"*物品数超过35个({len(game.item_system.inventory)}/50),建议调整背包"+COLOR_RESET)
+    if len(game.variables) > 35:
+        print(COLOR_YELLOW +
+              f"*变量数超过35个({len(game.variables)}),建议清理不必要变量"+COLOR_RESET)
 
 
+# 操作物品(opi指令)
 def operate_item(game: GameEngine):
     """
     操作物品
     """
-    show_desc = True
-    while True:
-        clear_screen()
-        print(game.current_description)
-        print("当前物品:" + game.get_inventory_text(show_desc))
-        print("\n仓库物品:" + game.get_item_repository_text(show_desc))
-        print("\n物品操作指令")
-        print("输入 '*use 被操作的物品名(或id) 进行什么操作 对哪个目标' 以操作物品(会推进剧情) 例如:'*use 石子 投掷 梅超风'表示对梅超风投掷石子 ")
-        print("'*remove 物品名(或id)' 以销毁物品;输入多个空格分隔的id以批量操作")
-        print("'*put 物品名(或id)' 以存储物品  (只有最后50个物品会参与剧情);输入多个空格分隔的id以批量操作")
-        print("'*get 物品名(或id)' 以从存储获得物品;输入多个空格分隔的id以批量操作")
-        print("'*add 物品名 物品描述' 以添加物品")
-        print("'*rename 物品id 新名称' 以重命名物品")
-        print("'*redesc 物品id 新描述' 以改变物品描述")
-        print("'**putall' 将所有物品转移到仓库")
-        print("'**getall' 获得所有仓库中物品")
-        print("'*desc 物品名(或id)' 以查看该物品描述")
-        print("'*showdesc' 以切换是否显示描述")
-        print("exit. 退出物品操作")
-        user_input = input("输入操作:\n::")
-        if user_input == "exit":
-            return False
-        elif user_input.startswith("*remove"):
-            item_names = user_input.split("*remove")[1].strip().split(" ")
-            for item_name in item_names:
-                if item_name.isdigit() and int(item_name) <= len(game.inventory):
-                    item_name = list(game.inventory.keys())[int(item_name)-1]
-                if item_name in game.inventory:
-                    del game.inventory[item_name]
-                    input(f"物品 {item_name} 已被销毁")
-                else:
-                    input(f"物品 {item_name} 不存在于你的库存中")
-        elif user_input.startswith("*put"):
-            item_names = user_input.split("*put")[1].strip().split(" ")
-            for item_name in item_names:
-                if item_name.isdigit() and int(item_name) <= len(game.inventory):
-                    item_name = list(game.inventory.keys())[int(item_name)-1]
-                if item_name in game.inventory:
-                    game.item_repository[item_name] = game.inventory[item_name]
-                    del game.inventory[item_name]
-                    input(f"物品 {item_name} 已被存储")
-                else:
-                    input(f"物品 {item_name} 不存在于你的库存中")
-        elif user_input.startswith("*get"):
-            item_names = user_input.split("*get")[1].strip().split(" ")
-            for item_name in item_names:
-                if item_name.isdigit() and int(item_name) <= len(game.item_repository):
-                    item_name = list(game.item_repository.keys())[
-                        int(item_name)-1]
-                if item_name in game.item_repository:
-                    game.inventory[item_name] = game.item_repository[item_name]
-                    del game.item_repository[item_name]
-                    input(f"物品 {item_name} 已被获得")
-                else:
-                    input(f"物品 {item_name} 不存在于物品仓库中")
-        elif user_input.startswith("*add"):
-            item_name, item_desc = user_input.split(
-                "*add")[1].strip().split(" ", 1)
-            game.item_repository[item_name] = item_desc
-            input(f"物品 {item_name} 已被添加")
-        elif user_input.startswith("*rename"):
-            item_id, new_name = user_input.split(
-                "*rename")[1].strip().split(" ", 1)
-            if item_id.isdigit() and int(item_id) <= len(game.inventory):
-                item_name = list(game.inventory.keys())[int(item_id)-1]
-            if item_name in game.inventory:
-                game.inventory[new_name] = game.inventory[item_name]
-                del game.inventory[item_name]
-                input(f"物品 {item_name} 已被重命名为 {new_name}")
-            else:
-                input(f"物品 {item_name} 不存在于你的库存中")
-        elif user_input.startswith("*redesc"):
-            item_id, new_desc = user_input.split(
-                "*redesc")[1].strip().split(" ", 1)
-            if item_id.isdigit() and int(item_id) <= len(game.inventory):
-                item_name = list(game.inventory.keys())[int(item_id)-1]
-            if item_name in game.inventory:
-                game.inventory[item_name] = new_desc
-                input(f"物品 {item_name} 已被重描述为 {new_desc}")
-            else:
-                input(f"物品 {item_name} 不存在于你的库存中")
-        elif user_input == "**putall":
-            game.item_repository.update(game.inventory)
-            game.inventory.clear()
-            input("所有物品已被存储")
-        elif user_input == "**getall":
-            game.inventory.update(game.item_repository)
-            game.item_repository.clear()
-            input("所有物品已被获得")
-        elif user_input.startswith("*use"):
-            itemname, action, target = user_input.split(
-                "*use")[1].strip().split()
-            if itemname.isdigit() and int(itemname) <= len(game.inventory):
-                itemname = list(game.inventory.keys())[int(itemname)-1]
-            if itemname in game.inventory:
-                print("等待合理性判定...")
-                if game.is_use_item_ok(itemname, action, target):
-                    print("操作合理，正在执行...")
-                    game.go_game(
-                        f"对{target}使用背包里的物品{itemname}进行{action}操作", True)
-                    return True
-                else:
-                    user_confirm = input("警告:操作不合理,仍要执行吗? (y/n)")
-                    if user_confirm.lower() == "y":
-                        print("正在执行...")
-                        game.go_game(
-                            f"对{target}使用背包里的物品{itemname}进行{action}操作 (操作不合理!)", True)
-                        return True
-                    else:
-                        input("操作已取消")
-            else:
-                input(f"物品 {itemname} 不存在于你的库存中")
-        elif user_input.startswith("*desc"):
-            item_name = user_input.split("*desc")[1].strip()
-            if item_name.isdigit() and int(item_name) <= len(game.inventory):
-                item_name = list(game.inventory.keys())[int(item_name)-1]
-            if item_name in game.inventory:
-                input(f"物品 {item_name} 的描述为: {game.inventory[item_name]}")
-            else:
-                input(f"物品 {item_name} 不存在于你的库存中")
-        elif user_input == "*showdesc":
-            show_desc = not show_desc
+    is_use_item, (itemname, action, target) = game.item_system.operate_item()
+    if is_use_item:
+        print("等待合理性判定...")
+        if game.is_use_item_ok(itemname, action, target):
+            print("操作合理，正在执行...")
+            game.go_game(
+                f"对{target}使用背包里的物品{itemname}进行{action}操作", is_custom=True)
+            return True
         else:
-            input("无效输入")
-            continue
-    return False
+            user_confirm = input("警告:操作不合理,仍要执行吗? (y/n)")
+            if user_confirm.lower() == "y":
+                print("正在执行...")
+                game.go_game(
+                    f"对{target}使用背包里的物品{itemname}进行{action}操作 (操作不合理!)", True)
+                return True
+            else:
+                input("操作已取消")
+    else:
+        return False
 
 
+# 分析token消耗趋势(ana_token指令)
 def analyze_token_consume(game: GameEngine):
     """
     分析游戏过程中token消耗趋势
@@ -832,42 +908,171 @@ def analyze_token_consume(game: GameEngine):
     input('按任意键继续')
 
 
-def show_item_var_caution(game: GameEngine):
-    """如果物品数/变量数超过35.分别提醒用户注意token消耗和适用性"""
-    if len(game.inventory) > 35:
-        print(COLOR_YELLOW +
-              f"*物品数超过35个({len(game.inventory)}/50),建议调整背包"+COLOR_RESET)
-    if len(game.variables) > 35:
-        print(COLOR_YELLOW +
-              f"*变量数超过35个({len(game.variables)}),建议清理不必要变量"+COLOR_RESET)
-
-
+@log_exceptions(logger)
 def new_game(no_auto_load=False):
     """
     主游戏逻辑
     """
-    global extra_datas
-    anime_loader = SyncLoadingAnimation()
-    GAME = GameEngine(config)
-    extra_datas = {"turns": 0,
-                   "think_count_remain": 0}
-    clear_screen()
-    anime_loader.start_animation("spinner", message="读取中")
+    extra_datas = ExtraData()
+    game_instance = GameEngine(config)
     show_init_resp = False
+    no_repeat_sign = False  # 运行指令后，原本的文字不再打字机效果输出
+    no_save_again_sign = False  # 运行查看类指令后，不再自动保存
+
+    def init_turn_datas():
+        nonlocal no_repeat_sign, no_save_again_sign
+        no_repeat_sign = False
+        no_save_again_sign = False
+        extra_datas.think_count_remain = int(max(
+            # 重置思考次数
+            min(game_instance.attr_system.get_attr("INT")//8, 4), -1)) + 1
+
+    def reg_cmds():
+        def cmd_csmode():
+            game_instance.prompt_manager.is_no_options = not game_instance.prompt_manager.is_no_options
+            print(
+                f"自定义模式{'开启' if game_instance.prompt_manager.is_no_options else '关闭'}")
+
+        def cmd_inv():
+            print(game_instance.item_system.get_inventory_text())
+
+        def cmd_opi():
+            nonlocal no_save_again_sign
+            if operate_item(game_instance):
+                init_turn_datas()
+                extra_datas.turns += 1
+            no_save_again_sign = False
+
+        def cmd_summary():
+            clear_screen()
+            print("<剧情摘要>")
+            print("\n".join(
+                [f"{i+1}. {it}" for i, it in enumerate(list(game_instance.history_simple_summaries))]))
+
+        def cmd_think():
+            nonlocal no_save_again_sign
+            if extra_datas and extra_datas.think_count_remain <= 0:
+                print("你无法再思考了，做出决定吧.")
+                return
+            content = input(
+                f"你思索某个疑问(思考次数还剩{int(extra_datas.think_count_remain)}次) 不输入内容以放弃思考 注意token消耗:\n:: ")
+            if content.strip() == "":
+                print("你放弃了思考.")
+                return
+            game_instance.think_go_game(content)
+            extra_datas.think_count_remain -= 1
+            no_save_again_sign = False
+
+        def cmd_csforce():
+            extra_datas.skip_csmode_action_modify = not extra_datas.skip_csmode_action_modify
+            print(
+                f"将{'跳过' if extra_datas.skip_csmode_action_modify else '不跳过'}自定义行动的行动修饰")
+
+        def cmd_ana_token():
+            analyze_token_consume(game_instance)
+
+        def cmd_fix_item_name():
+            nonlocal no_save_again_sign
+            game_instance.item_system.fix_item_name_error()
+            no_save_again_sign = False
+            print("道具名修复完成")
+
+        def cmd_show_init_resp():
+            nonlocal show_init_resp
+            show_init_resp = not show_init_resp
+            print(f"将显示AI原始响应与Token信息：{show_init_resp}")
+
+        def cmd_config():
+            nonlocal no_save_again_sign
+            game_instance.custom_config.config_game()
+            no_save_again_sign = False
+
+        def cmd_load():
+            nonlocal no_repeat_sign
+            loadsuccess, _ = manual_load(game_instance, extra_datas)
+            if loadsuccess:
+                print("成功加载，按任意键继续...")
+                no_repeat_sign = False  # 加载游戏成功，重新启用打字机效果
+            else:
+                print("加载失败，按任意键继续...")
+
+        def cmd_save():
+            manual_save(game_instance, extra_datas)
+
+        def cmd_delvar():
+            nonlocal no_save_again_sign
+            clear_screen()
+            print(game_instance.get_vars_text())
+            name = input("请输入要删除的变量名：\n:: ")
+            if name not in game_instance.variables:
+                print("变量不存在")
+            del game_instance.variables[name]
+            no_save_again_sign = False
+            print("完成删除")
+
+        def cmd_setvar():
+            nonlocal no_save_again_sign
+            clear_screen()
+            print(game_instance.get_vars_text())
+            name = input("请输入要设置的变量名：\n:: ")
+            val = input("请输入要设置的变量值：\n:: ")
+            game_instance.variables[name] = val
+            no_save_again_sign = False
+            print("完成设置")
+
+        def cmd_vars():
+            clear_screen()
+            print(game_instance.get_vars_text())
+
+        def cmd_attr():
+            print(game_instance.attr_system.get_attribute_text(colorize=True))
+
+        def cmd_conclude_summary():
+            nonlocal no_save_again_sign
+            game_instance.go_game("", False, True)
+            no_save_again_sign = False
+            print("总结完成")
+
+        cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
+        cmd_manager.reg("csmode", cmd_csmode, "切换自定义模式")
+        cmd_manager.reg("inv", cmd_inv, "查看物品")
+        cmd_manager.reg("opi", cmd_opi, "操作物品")
+        cmd_manager.reg("summary", cmd_summary, "查看摘要")
+        cmd_manager.reg("think", cmd_think, "思考/联想")
+        cmd_manager.reg("cs*f", cmd_csforce, "跳过自定义选项修饰")
+        cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
+        cmd_manager.reg("fix_item_name", cmd_fix_item_name, "修复物品名错误")
+        cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
+        cmd_manager.reg("config", cmd_config, "配置游戏")
+        cmd_manager.reg("load", cmd_load, "读取存档")
+        cmd_manager.reg("save", cmd_save, "保存")
+        cmd_manager.reg("delvar", cmd_delvar, "删除变量")
+        cmd_manager.reg("setvar", cmd_setvar, "设置/添加变量")
+        cmd_manager.reg("vars", cmd_vars, "显示变量")
+        cmd_manager.reg("attr", cmd_attr, "显示属性")
+        cmd_manager.reg("conclude_summary", cmd_conclude_summary, "总结摘要")
+        cmd_manager.reg("new", lambda: 1, "开始新游戏")
+        cmd_manager.reg("exit", lambda: 1, "退出游戏")
+    reg_cmds()
+
+    commands = cmd_manager.cmds
+
+    clear_screen()
+    print("等待读取..")
+
     if not no_auto_load:
-        loadsuccess, _, message = load_game(GAME)
+        loadsuccess, message = load_game(game_instance, extra_datas)
         print(message)
     else:
         loadsuccess = False
-    anime_loader.stop_animation()
     if not loadsuccess:
         input("按任意键开始配置游戏参数,配置完毕后，将设置主角初始属性,之后游戏开始。")
-        config_game()
-        GAME = GameEngine(config)  # 防止部分配置未加载？
+        game_instance.custom_config.config_game()
+        game_instance = GameEngine(config)  # 防止部分配置未加载？
         # 设定属性
         while True:
             attrs = input(
-                "依次输入6个数来决定你的属性(力、敏、智、感、魅、运;一般建议均在5到20之间,默认均为10)\n::")
+                "依次输入6个数来决定你的属性(力、敏、智、感、魅、运;一般建议均在5-50间,默认均为20)\n::")
             if attrs.strip() == "":
                 break
             attrs = attrs.split()
@@ -879,191 +1084,74 @@ def new_game(no_auto_load=False):
             except ValueError:
                 print("请输入6个数")
                 continue
-            for key, val in zip(GAME.character_attributes.keys(), attrs):
-                GAME.character_attributes[key] = val
+            for key, val in zip(game_instance.attr_system.attributes.keys(), attrs):
+                game_instance.attr_system.attributes[key] = val
             break
-        print(GAME.get_attribute_text(colorize=True))
-        tmp = input("以自定义模式开局？(y/n)")
+        print(game_instance.attr_system.get_attribute_text(colorize=True))
+        tmp = input("以自定义模式开局？(y/n)\n::")
         if tmp.strip() == "y":
-            GAME.prompt_manager.is_no_options = True
-        GAME.game_id = input("为本局游戏命名(或留空)：\n::").strip()
+            game_instance.prompt_manager.is_no_options = True
+        game_instance.game_id = input("为本局游戏命名(或留空)：\n::").strip()
         st_story = input('输入开局故事(留空随机）:\n:: ')
-        anime_loader.start_animation("spinner", message="*等待<世界>回应*")
-        GAME.start_game(st_story)
-        anime_loader.stop_animation()
+        game_instance.anime_loader.start_animation(
+            "spinner", message="*等待<世界>回应*")
+        game_instance.start_game(st_story)
+        game_instance.anime_loader.stop_animation()
         # 思考次数
-        extra_datas["think_count_remain"] = int(max(
-            min(GAME.character_attributes["INT"]//8, 4), -1)) + 1
+        extra_datas.think_count_remain = int(max(
+            min(game_instance.attr_system.get_attr("INT")//8, 4), -1)) + 1
         # 游戏ID
-        if not GAME.game_id:
-            GAME.game_id = generate_game_id()
-    no_repeat_sign = False  # 运行指令后，原本的文字不再打字机效果输出
+        if not game_instance.game_id:
+            game_instance.game_id = generate_game_id()
 
-    def init_turn_datas():
-        global no_repeat_sign, extra_datas
-        no_repeat_sign = False
-        extra_datas["think_count_remain"] = int(max(
-            min(GAME.character_attributes["INT"]//8, 4), -1)) + 1  # 重置思考次数
-
-    while GAME.current_game_status == "ongoing":
-
+    while game_instance.current_game_status == "ongoing":
         clear_screen()
-        print_all_history(GAME)
+        print_all_history(game_instance)
         if not no_repeat_sign:
-            display_narrative(GAME.current_description)
+            display_narrative_with_typewriter(
+                text_colorize(game_instance.current_description))
             no_repeat_sign = True
         else:
-            print(GAME.current_description)
-        print(GAME.get_situation_text())
-        GAME.print_all_messages_await()
-        show_item_var_caution(GAME)
-        display_options(GAME)
+            print(text_colorize(game_instance.current_description))
+        print(game_instance.situation_system.get_situation_text(colorize=True))
+        game_instance.print_all_messages_await()
+        show_item_var_caution(game_instance)
+        display_options(game_instance)
 
         print(
-            f"字数:{sum([len(it) for it in GAME.history_descriptions])} | Token/all:{GAME.l_c_token+GAME.l_p_token}/{GAME.total_tokens} | Ver:{VERSION} | [{GAME.game_id}]")
+            f"字数:{sum([len(it) for it in game_instance.history_descriptions])} | Token/all:{game_instance.l_c_token+game_instance.l_p_token}/{game_instance.total_tokens} | Ver:{VERSION} | [{game_instance.game_id}]")
         if show_init_resp:
-            print(GAME.current_response)
-            print(GAME.get_token_stats())
-        if not GAME.current_description.strip() or not GAME.current_options:
+            print(game_instance.current_response)
+            print(game_instance.get_token_stats())
+        if not game_instance.current_description.strip() or not game_instance.current_options:
             print("可能出现错误")
-            print(GAME.current_response)
-        GAME.log_game(os.path.join(
-            LOG_DIR, GAME.game_id+f"_{CURRENT_TIME}.log"))
-        save_game(GAME)
-        user_input = get_user_input_and_go(GAME)
+            print(game_instance.current_response)
+            input("按任意键继续...")
+            continue
+        if not no_save_again_sign:
+            game_instance.log_game(os.path.join(
+                LOG_DIR, game_instance.game_id+f"_t{extra_datas.turns}.log"))
+            save_game(game_instance, extra_datas)
+            no_save_again_sign = True
+
+        user_input = get_user_input_and_go(
+            game_instance, extra_datas, commands)
 
         if user_input == "exit":
             return 'exit'
-        elif user_input == "csmode":
-            GAME.prompt_manager.is_no_options = not GAME.prompt_manager.is_no_options
-            print(f"自定义模式{'开启' if GAME.prompt_manager.is_no_options else '关闭'}")
-            input("按任意键继续...")
-            continue
-        elif user_input == "inv":
-            print(GAME.get_inventory_text())
-            input("按任意键继续...")
-            continue
-        elif user_input == "opi":
-            if operate_item(GAME):
-                init_turn_datas()
-                continue
-            input("按任意键继续...")
-            continue
-        elif user_input == "summary":
-            clear_screen()
-            print("摘要")
-            print("\n".join(
-                [f"{i+1}. {it}" for i, it in enumerate(list(GAME.history_simple_summaries))]))
-            input("按任意键继续...")
-            continue
-        elif user_input == "conclude_summary":
-            GAME.go_game("", False, True)
-            input("总结完成，按任意键继续...")
-            continue
-        elif user_input == "attr":
-            print(GAME.get_attribute_text(colorize=True))
-            input("按任意键继续...")
-            continue
-        elif user_input == "vars":
-            clear_screen()
-            print(GAME.get_vars_text())
-            input("按任意键继续...")
-            continue
-        elif user_input == "setvar":
-            clear_screen()
-            print(GAME.get_vars_text())
-            name = input("请输入要设置的变量名：\n:: ")
-            val = input("请输入要设置的变量值：\n:: ")
-            GAME.variables[name] = val
-            input("完成设置，按任意键继续...")
-            continue
-        elif user_input == "delvar":
-            clear_screen()
-            print(GAME.get_vars_text())
-            name = input("请输入要删除的变量名：\n:: ")
-            if name not in GAME.variables:
-                input("变量不存在，按任意键继续...")
-                continue
-            del GAME.variables[name]
-            input("完成删除，按任意键继续...")
-            continue
-        elif user_input == "save":
-            manual_save(GAME)
-            input("按任意键继续...")
-            continue
-        elif user_input == "load":
-            loadsuccess, _ = manual_load(GAME)
-            if loadsuccess:
-                print("成功加载，按任意键继续...")
-                no_repeat_sign = False  # 加载游戏成功，重新启用打字机效果
-                continue
-            else:
-                print("加载失败，按任意键继续...")
-                continue
-        elif user_input == "config":
-            config_game()
-            continue
         elif user_input == "new":
             return 'new_game'
-        elif user_input == "show_init_resp":
-            show_init_resp = not show_init_resp
-            print(f"将显示AI原始响应与Token信息：{show_init_resp}")
-            input("按任意键继续...")
-            continue
-        elif user_input == "fix_item_name":
-            GAME.fix_item_name_error()
-            print("道具名修复完成")
-            input("按任意键继续...")
-            continue
-        elif user_input == "ana_token":
-            analyze_token_consume(GAME)
-            continue
-        elif user_input == "think":
-            if extra_datas["think_count_remain"] <= 0:
-                input("你无法再思考了，做出决定吧.(按任意键继续)")
-                continue
-            content = input(
-                f"你思索某个疑问(思考次数还剩{int(extra_datas['think_count_remain'])}次) 不输入内容以放弃思考 注意token消耗:\n:: ")
-            if content.strip() == "":
-                input("你放弃了思考.(按任意键继续)")
-                continue
-            GAME.think_go_game(content)
-            extra_datas["think_count_remain"] -= 1
-            input("思考完成，按任意键继续...")
-            continue
-
-        elif user_input == "help":
-            print("可用指令：")
-            print(f"{COLOR_GREEN}save{COLOR_RESET}:保存游戏")
-            print(f"{COLOR_GREEN}load{COLOR_RESET}:读取游戏")
-            print(f"{COLOR_GREEN}new{COLOR_RESET}:新游戏")
-            print(f"{COLOR_GREEN}config{COLOR_RESET}:配置游戏")
-            print(f"{COLOR_GREEN}exit{COLOR_RESET}: 退出游戏")
-            print(f"{COLOR_GREEN}inv{COLOR_RESET}: 查看道具")
-            print(f"{COLOR_GREEN}opi{COLOR_RESET}:进行道具操作")
-            print(f"{COLOR_GREEN}attr{COLOR_RESET}:显示属性")
-            print(f"{COLOR_GREEN}summary{COLOR_RESET}:查看摘要")
-            print(f"{COLOR_GREEN}vars{COLOR_RESET}:查看变量")
-            print(f"{COLOR_YELLOW}custom{COLOR_RESET}:自定义行动")
-            print(f"{COLOR_YELLOW}csmode{COLOR_RESET}:切换自定义模式")
-            print(f"{COLOR_YELLOW}think{COLOR_RESET}:思考/联想")
-            print(f"{COLOR_YELLOW}setvar{COLOR_RESET}:添加/设置变量")
-            print(f"{COLOR_YELLOW}delvar{COLOR_RESET}:删除变量")
-            print(f"{COLOR_RED}conclude_summary{COLOR_RESET}:手动总结当前摘要(不推荐)")
-            print(f"{COLOR_RED}ana_token{COLOR_RESET}:统计token数据")
-            print(f"{COLOR_RED}fix_item_name{COLOR_RESET}:修复道具名中的错误")
-            print(
-                f"{COLOR_RED}show_init_resp{COLOR_RESET}:切换显示对每轮剧情的AI的原始相应与Token信息(debug)")
-            input("按任意键继续...")
-            continue
+        elif user_input in commands:
+            cmd_manager.run(user_input)
+            input("按任意键继续..")
         else:
-            extra_datas["turns"] += 1
+            extra_datas.turns += 1
             init_turn_datas()
 
     clear_screen()
     print("游戏结束,下面是你本局游戏的摘要")
-    print(f"你共进行了{extra_datas['turns']}轮游戏")
-    for turn, it in enumerate(GAME.history_simple_summaries):
+    print(f"你共进行了{extra_datas.turns}轮游戏")
+    for turn, it in enumerate(game_instance.history_simple_summaries):
         print(f"第{turn+1}轮：{it}")
     input("按任意键退出...")
 
@@ -1072,6 +1160,10 @@ def main():
     """
     主函数，游戏入口
     """
+    if sys.platform != "linux":
+        game_title = GameTitle()
+        game_title.show()
+
     no_auto_load = False
     while True:
         i = new_game(no_auto_load)

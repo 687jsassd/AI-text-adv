@@ -1,8 +1,16 @@
 # 低成本AI文字冒险游戏引擎
 
-一个基于AI的沉浸式文字冒险游戏引擎，使用Python开发，支持中文交互，具备完整的角色扮演游戏机制。
+一个基于AI的沉浸式文字冒险游戏引擎，使用Python开发，支持中文交互，具备完整的角色扮演游戏机制。当前版本：EXP-v0.1.7
 
 ## 🎮 项目特色
+
+### EXP-v0.1.7 主要更新
+- **项目重构**: 代码结构优化，模块独立化
+- **全新检定动画**: 完全重做的概率检定视觉效果
+- **完善的日志系统**: 新增错误记录和游戏日志功能
+- **压缩存储**: 日志和存档采用.gz格式，大幅减小体积
+- **新增cs*f指令**: 自定义输入时无选项修饰的快速模式
+- **多项优化修复**: 修复文本错位、颜色污染等关键bug
 
 ### 细节更新见更新日志
 
@@ -13,7 +21,9 @@
 - **角色属性系统**: 六维主角属性，且可变动成长
 - **道具管理系统**: 完整的背包系统，支持道具获取、使用和丢弃
 - **概率检定机制**: 基于属性的成功概率计算和可视化动画
-- **自动存档系统**: 每回合自动保存，支持手动存档/读档
+- **自动存档系统**: 每回合自动保存（保留最近5个自动存档），支持手动存档/读档
+- **完善的日志系统**: 错误记录和游戏日志，压缩存储减小体积
+- **动态颜色显示**: 文本颜色动态上色，避免ANSI代码污染
 - **无选项-自定义模式**: 完全由玩家主导的行动，配合独特的选项类型修饰带来跌宕体验
 - **精心设计提示词下的近自由探索世界**：剧情一般不会明示暗示将主角卷入某场风波，玩家可随心所欲在世界探索生活。
 - **Think 主角思考**： 提供主角的思考功能，玩家与主角可通过思考进行交流，思考还可提供一些解释说明甚至攻略指引，提升丰富度
@@ -22,12 +32,9 @@
 
 ### ▲成本低廉：
 
-在v0.1.6的版本下，token消耗有所增加，这是新系统(变量表)的引入导致的，
-但斜率下降的趋势没有变化，仍然可控。
-1-110轮: 平均token消耗：4169.34 拟合直线: y = 17.4804x + 3199.1726
+在v0.1.6+的版本下的表现待统计和分析.
 
-
-在v0.1.4的版本下，完善的提示词与良好剧情体验下，中等轮数的表现如下，该新版本相较于下面的旧版本来说，内容更多但效果反而更好：
+在v0.1.4版本的表现如下:
 
 1-80轮:  平均token消耗: 3589.64  拟合直线: y = 16.0600x + 2939.2057
 
@@ -70,7 +77,7 @@
 
 1-100轮:  平均token消耗: 3687.30  拟合直线: y = 18.9110x + 2732.2939 
 
-(以上测试均基于单局，由于物品、变量、剧情不同，数据可能不准确。受限于成本，多局测试结果尚待确认)
+(以上测试均基于单局，由于物品、变量、剧情(尤其是剧情信息密度)不同，数据可能不准确。受限于成本，多局测试结果尚待确认)
 
 ### 技术亮点
 
@@ -79,12 +86,14 @@
 - **动画效果**: 加载动画、打字机效果、概率检定动画
 - **Token统计**: 实时监控API使用情况，优化成本控制
 - **历史压缩**: 自动管理游戏历史，防止上下文过长
+- **日志系统**: 完善的错误记录和游戏日志，支持压缩存储
+- **动态颜色**: 文本颜色动态上色，避免代码污染
 
 ## 🚀 快速开始
 
 ### 环境要求
 - Python 3.7+
-- 依赖包：`openai`, `json_repair`
+- 依赖包：`openai`, `json_repair` `rich`, `keyboard`       
 
 ### 安装步骤
 
@@ -96,7 +105,7 @@ cd AI-game-test
 
 2. **安装依赖**
 ```bash
-pip install openai json_repair
+pip install openai json_repair rich keyboard
 ```
 
 3. **配置API**
@@ -174,6 +183,7 @@ python main.py
 | `ana_token` | Token统计 | 查看API使用统计 |
 | `help` | 显示帮助 |  |
 | `csmode` | 切换完全自定义行动模式 |  |
+| `cs*f` | 快速自定义行动(无选项修饰) | 新版本新增 |
 | `show_init_resp` | 切换显示AI原始回复和token详细信息 | 可切换开关，调试用 |
 | `vars` | 查看变量 |  |
 | `setvar` | 添加/设定变量 |  |
@@ -198,25 +208,39 @@ python main.py
 
 ```
 AI-game-test/
-├── main.py              # 主程序入口，游戏循环和UI
-├── game_engine.py       # 游戏引擎核心逻辑
-├── config.py            # 配置管理系统
-├── prompt_manager.py    # 提示词管理
-├── animes.py            # 动画效果工具
-├── config/              # 配置文件目录
+├── main.py                      # 主程序入口，游戏循环和UI
+├── game_engine.py               # 游戏引擎核心逻辑
+├── config.py                    # 配置管理系统
+├── libs/                        # 核心模块库（EXP-v0.1.7重构）
+│   ├── animes_rich.py               # 使用rich库的动画效果库
+│   ├── animes.py               # 动画效果工具
+│   ├── prompt_manager.py       # 提示词管理
+│   ├── event_manager.py        # 事件管理系统
+│   ├── extra_attributes.py     # 属性系统模块
+│   ├── extra_item_inventory.py # 物品库存管理
+│   ├── extra_situation.py      # 形势系统模块
+│   ├── formula_and_checks.py   # 公式和检定系统
+│   ├── logger.py               # 日志系统
+│   └── practical_funcs.py      # 实用函数库
+├── config/                      # 配置文件目录
 │   ├── config.json              # 游戏设置
 │   ├── llm_api_config.json      # API提供商配置
 │   └── llm_api_config.example.json  # API配置示例
-├── saves/               # 存档目录
-├── logs/                # 游戏日志
-└── __pycache__/         # Python缓存
+├── saves/                       # 存档目录（.gz压缩格式）
+├── logs/                        # 游戏日志目录（按游戏ID分类）
+├── tools/                       # 工具脚本
+│   └── ana_tokens.py           # Token消耗分析工具
+├── build/                       # 打包构建目录
+├── dist/                       # 分发目录
+├── venv/                       # Python虚拟环境
+└── __pycache__/                # Python缓存
 ```
 
 ## 🔧 开发指南
 
 ### 扩展新功能
 
-1. **添加新命令**: 在 `main.py` 的 `get_user_input_and_go` 函数中添加命令处理
+1. **添加新命令**: 在 `main.py` 的 `new_game` 函数中添加命令文本到commands元组，然后在后续if-elif分支写对应逻辑即可
 2. **修改游戏机制**: 编辑 `game_engine.py` 中的相关方法
 3. **自定义提示词**: 修改 `prompt_manager.py` 中的提示词模板
 
@@ -226,7 +250,7 @@ AI-game-test/
 ```json
 {
   "description": "场景描述",
-  "summary": "10-25字摘要",
+  "summary": "摘要",
   "options": [
     {
       "id": 1,
@@ -240,7 +264,7 @@ AI-game-test/
   ],
   "commands": [
     {
-      "command": "add_item|remove_item|change_attribute|change_situation_value|gameover",
+      "command": "命令",
       "value": "指令值"
     }
   ]
@@ -268,9 +292,10 @@ AI-game-test/
 - 支持Token消耗分析功能(使用ana_token指令进行分析)
 
 ### 存档优化
-- 自动存档管理（保留每局的最近10个自动存档与所有手动存档）
+- 自动存档管理（保留每局的最近5个自动存档与所有手动存档）
 - 游戏ID标识，支持多游戏并行
 - 存档文件包含完整游戏状态
+- 采用.gz压缩格式，大幅减小存储空间
 
 ## 🐛 故障排除
 
@@ -287,21 +312,33 @@ AI-game-test/
    - 检查 `saves/` 目录权限
    - 确认磁盘空间充足
 
+4. **对于任何可能异常**
+   - 找到logs/global_error.log文件或者截图错误,以详细说明,向我们提交错误信息或者PR
+
 ### 调试命令
 
 游戏内置调试命令：
 - `show_init_resp`: 显示AI原始响应
 - `fix_item_name`: 修复道具名错误
 - `ana_token`: 分析Token使用模式
+- `cs*f`: 快速自定义行动(跳过选项修饰)
 - `opi`下`*add`等指令：添加物品、修改物品、移除物品等
 - `setvar`: 添加/设定变量
 - `delvar`: 删除变量
+
+### 日志系统
+
+EXP-v0.1.7新增了完善的日志功能：
+- **游戏日志**: 记录完整的游戏过程，存储在`logs/`目录下
+- **错误日志**: 记录运行时的错误信息
+- **压缩存储**: 所有日志文件采用.gz格式压缩
+- **按游戏ID分类**: 日志按游戏ID分文件夹存储
 
 
 ## 打包为exe文件的说明
 
 1. 安装pyinstaller：`pip install pyinstaller`
-2. 建议打包命令: `pyinstaller --noconfirm --clean --onedir --icon ".\icon.ico" --add-data ".\config;config/" --add-data ".\logs;logs/" --add-data ".\saves;saves/" --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module matplotlib ".\main.py"`
+2. 建议打包命令: `pyinstaller --noconfirm --clean --onedir --icon ".\icon.ico" --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module matplotlib ".\main.py"`
   * 查阅main.spec 以了解详细配置
 3. 在`dist/`目录下找到生成的exe文件
 
@@ -331,8 +368,9 @@ AI-game-test/
 
 ## TODO NEXT
 
-√ 添加总结摘要时附带清理旧、无用变量或物品的机制，减缓token消耗增加。
-重构项目代码
+√ 完善日志系统（EXP-v0.1.7已完成）
+√ 修复已知bug（EXP-v0.1.7已完成）
+▲ 重构项目代码（EXP-v0.1.7已完成大部分）
 GUI开发
 (Long run)加入并完善NPC记忆系统，并尝试获得较好效益
 
