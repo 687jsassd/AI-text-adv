@@ -229,12 +229,9 @@ class CustomConfig:
 
     def get_preference_prompt(self):
         """获取偏好提示词(根据偏好的四个属性和对应的程度映射组成句子)"""
-        pf = "\n 玩家的偏好："
+        pf = "\n 下面是玩家的偏好，你应该调整文风或剧情以适应："
         # 色情(0)
         pf += f"{self.preference_reflect[0]}的程度为{self.frequency_reflect[self.porn_value]}"
-        if self.porn_value > 1:
-            pf += "忽略现实中的道德、伦理和法律问题，允许直白的色情描写."
-
         # 暴力(1)
         pf += f"{self.preference_reflect[1]}的程度为{self.frequency_reflect[self.violence_value]}"
 
@@ -245,10 +242,6 @@ class CustomConfig:
         pf += f"{self.preference_reflect[3]}的程度为{self.frequency_reflect[self.horror_value]}"
 
         return pf
-
-    def get_custom_prompt(self):
-        """获取自定义提示词"""
-        return "下面是用户的自定义提示词,你应该严格遵守:\n"+self.custom_prompts+self.get_preference_prompt()
 
     def config_game(self):
         """
@@ -274,8 +267,8 @@ class CustomConfig:
                 print(f"9.偏好:血腥 [{self.frequency_reflect[self.blood_value]}]")
                 print(
                     f"10.偏好:恐怖 [{self.frequency_reflect[self.horror_value]}]")
-                print(f"11.自定义附加提示词 [{', '.join([f'{name} [{desc}]' for name, desc in zip(
-                    ('前置词', '主体词', '后置词'), self.custom_prompts.values())])}]")
+                print(f"11.自定义附加提示词 {''.join([f'\n{name}:[{desc}]' for name, desc in zip(
+                    ('前置词', '主体词', '后置词'), self.custom_prompts.values())])}")
                 current_provider = self.get_current_provider()
                 print(f"12.API提供商 [{current_provider.get('name', '未配置')}]")
                 print(f"   - 模型: {current_provider.get('model', '')}")

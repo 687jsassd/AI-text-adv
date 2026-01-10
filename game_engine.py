@@ -192,14 +192,6 @@ class GameEngine:
                 logger.warning("未能解析描述??\n %s", json_response)
                 input(f"未能解析描述?? 按键重试 {json_response}\n")
                 return False
-            # 添加换行
-            self.current_description = re.sub(
-                r"。(?!』)",  # 正则规则：匹配"。"，且其后紧跟的不是"』"
-                "。\n",       # 替换成：。+换行符
-                self.current_description
-            )
-            self.current_description = self.current_description.replace(
-                "』", "』\n")
             if self.current_description:
                 self.history_simple_summaries.append(
                     json_response.get("summary", ""))
@@ -222,7 +214,7 @@ class GameEngine:
         logger.info("开始游戏: %s", st_story)
         init_prompt = self.prompt_managers['start'].get_full_prompt(
             extra_prompts={
-                PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}" + self.custom_config.custom_prompts['pre'],
+                PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}" + self.custom_config.get_preference_prompt() + self.custom_config.custom_prompts['pre'],
                 PromptSection.BODY_PROMPT: self.custom_config.custom_prompts['body'],
                 PromptSection.USER_INPUT: f"以{st_story if st_story else '一个完全随机的场景'}为故事开头，开始本局沉浸式文字游戏",
                 PromptSection.POST_PROMPT: self.custom_config.custom_prompts['post'],
@@ -258,7 +250,7 @@ class GameEngine:
         if user_ipt:
             prompt = self.prompt_managers['continue'].get_full_prompt(
                 extra_prompts={
-                    PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}" + self.custom_config.custom_prompts['pre'],
+                    PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}" + self.custom_config.get_preference_prompt()+self.custom_config.custom_prompts['pre'],
                     PromptSection.BODY_PROMPT: self.custom_config.custom_prompts['body'],
                     PromptSection.POST_PROMPT: self.custom_config.custom_prompts['post'],
                 }
