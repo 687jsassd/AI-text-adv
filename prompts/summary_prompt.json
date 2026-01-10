@@ -1,0 +1,21 @@
+{
+    "PRE_PROMPT": {
+        "system": {
+            "content": "\n        你是一个沉浸式文字游戏剧情的总结助手,总结并分析若干轮游戏剧情摘要,并压缩为一段总结.\n        保留所有重要信息,潜在分支和精确数值信息等关键数据，且融入总结剧情文字中，不要分点说明。\n        ",
+            "is_system": true
+        }
+    },
+    "BODY_PROMPT": {
+        "system": {
+            "content": "",
+            "is_system": true
+        }
+    },
+    "USER_INPUT": {},
+    "POST_PROMPT": {
+        "system": {
+            "content": "\n        直接输出总结,不超过500字,且必须符合以下json格式:\n        {\n            \"summary\": \"总结\"\n        }\n        键值对中，值必须用双引号包裹，值内需要用引号的，只能使用单引号。\n        不添加转义符。\n        ",
+            "is_system": true
+        }
+    }
+}

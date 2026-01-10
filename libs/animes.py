@@ -289,7 +289,6 @@ def typewriter_effect(text: str,
 
             # 如果不是最后一行，添加换行和延迟
             if line_idx < len(lines) - 1:
-                print()  # 换行
                 if not skip_event.is_set():
                     time.sleep(newline_delay)
 

@@ -71,7 +71,11 @@ class CustomConfig:
             "ai_settings", {}).get("presence_penalty", 0.1)
 
         # 自定义提示词相关
-        self.custom_prompts = self.config_data.get("custom_prompts", "")
+        self.custom_prompts = self.config_data.get("custom_prompts", {
+            'pre': "",
+            'body': "",
+            'post': "",
+        })
 
         # 偏好相关
         self.porn_value = self.config_data.get(
@@ -171,7 +175,11 @@ class CustomConfig:
                         "player_name": "玩家",
                         "player_story": ""
                     },
-                    "custom_prompts": ""
+                    "custom_prompts": {
+                        'pre': "",
+                        'body': "",
+                        'post': "",
+                    }
                 }
                 self._save_json_file(CONFIG_FILE, default_config)
                 return default_config
@@ -266,7 +274,8 @@ class CustomConfig:
                 print(f"9.偏好:血腥 [{self.frequency_reflect[self.blood_value]}]")
                 print(
                     f"10.偏好:恐怖 [{self.frequency_reflect[self.horror_value]}]")
-                print(f"11.自定义附加提示词 [{self.custom_prompts}]")
+                print(f"11.自定义附加提示词 [{', '.join([f'{name} [{desc}]' for name, desc in zip(
+                    ('前置词', '主体词', '后置词'), self.custom_prompts.values())])}]")
                 current_provider = self.get_current_provider()
                 print(f"12.API提供商 [{current_provider.get('name', '未配置')}]")
                 print(f"   - 模型: {current_provider.get('model', '')}")
@@ -289,7 +298,9 @@ class CustomConfig:
                                   频率惩罚 用于抑制重复表述与冗余 建议在0.3-0.8之间(当前:{self.frequency_penalty})
                                   存在惩罚 用于鼓励引入新元素与话题 建议在0.3-0.8之间(当前:{self.presence_penalty})
                                   玩家故事 相当于玩家背景，可写个人经历、兴趣特长、目的等，会影响游戏的发展方向。
-                                  自定义附加提示词 建议写世界设定/规则、补充说明等，会影响游戏的发展方向。
+                                  自定义附加提示词(PRE) 建议写要求定义、世界设定/规则等，会影响游戏的发展方向。
+                                  自定义附加提示词(BODY) 建议写知识、背景、期望发展等，会影响游戏的发展方向。
+                                  自定义附加提示词(POST) 建议写规则限定等，会影响游戏的发展方向。
                                   可用API提供商: 如未配置，应当前往config/llm_api_config.json配置,否则无法使用。
                                   
                                   按任意键返回。
@@ -316,7 +327,19 @@ class CustomConfig:
                         elif choice == 10:
                             self.horror_value = int(input("输入恐怖偏好（0-5）："))
                         elif choice == 11:
-                            self.custom_prompts = input("输入自定义附加提示词：")
+                            which_p = input("输入要更改的自定义附加提示词(PRE/BODY/POST)：")
+                            if which_p.strip().upper() == "PRE":
+                                self.custom_prompts['pre'] = input(
+                                    "输入前置词：")
+                            elif which_p.strip().upper() == "BODY":
+                                self.custom_prompts['body'] = input(
+                                    "输入主体词：")
+                            elif which_p.strip().upper() == "POST":
+                                self.custom_prompts['post'] = input(
+                                    "输入后置词：")
+                            else:
+                                print("无效的选项ID，请重新输入。")
+                                continue
                         elif choice == 12:
                             print("可用API提供商:")
                             for key, provider in self.api_providers.items():
