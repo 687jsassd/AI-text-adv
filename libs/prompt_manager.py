@@ -258,3 +258,33 @@ class PromptManagerRebuild:
         except Exception as e:
             print(f"❌ 加载JSON失败: {str(e)}")
             return False
+
+    def add_from_json(self, file_path: str) -> bool:
+        """
+        从指定JSON文件加载配置，将其添加到当前管理器中，而不是覆盖
+        :param file_path: JSON文件读取路径
+        :return: 加载成功返回True，失败返回False
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            new_manager = self.from_dict(data)
+            for section in PromptSection:
+                self._sections[section].update(
+                    new_manager._sections[section])
+                self._section_orders[section].extend(
+                    new_manager._section_orders[section])
+            return True
+        except FileNotFoundError:
+            print(f"❌ 错误: 指定的文件 {file_path} 不存在")
+            return False
+        except json.JSONDecodeError:
+            print(f"❌ 错误: 文件 {file_path} 不是有效的JSON格式")
+            return False
+        except PermissionError:
+            print(f"❌ 错误: 无权限读取文件 {file_path}")
+            return False
+        except Exception as e:
+            print(f"❌ 加载JSON失败: {str(e)}")
+            return False

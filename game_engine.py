@@ -6,7 +6,6 @@
 # 游戏引擎
 import json
 import os
-import re
 import logging
 import gzip
 from collections import deque
@@ -255,7 +254,8 @@ class GameEngine:
                     PromptSection.POST_PROMPT: self.custom_config.custom_prompts['post'],
                 }
             ).replace(
-                "{history_story}", self.history_simple_summaries[-1]
+                "{history_story}", '\n'.join(
+                    self.history_simple_summaries[:-5] + self.history_descriptions[-4:-1])
             ).replace(
                 "{current_scene}", self.current_description
             ).replace(
@@ -432,3 +432,37 @@ class GameEngine:
         """打印所有待显示消息"""
         while self.message_queue:
             print(self.message_queue.popleft())
+
+    # 提示词管理器-自动加载customprompt文件夹下所有json文件(s_开头加载到start中，c_开头加载到continue中,sum_开头加载到summary中,其余的全部添加)
+
+    def load_custom_prompts(self):
+        """自动加载customprompt文件夹下所有json文件"""
+        custom_prompt_dir = os.path.join(
+            os.path.dirname(__file__), "customprompt")
+        if not os.path.exists(custom_prompt_dir):
+            logger.warning("customprompt文件夹不存在")
+            os.makedirs(custom_prompt_dir, exist_ok=True)
+            return
+        for filename in os.listdir(custom_prompt_dir):
+            if filename.endswith(".json"):
+                file_path = os.path.join(custom_prompt_dir, filename)
+                if filename.startswith("s_"):
+                    if self.prompt_managers['start'].add_from_json(file_path):
+                        self.message_queue.append(f"成功加载提示词到start: {filename}")
+                elif filename.startswith("c_"):
+                    if self.prompt_managers['continue'].add_from_json(file_path):
+                        self.message_queue.append(
+                            f"成功加载提示词到continue: {filename}")
+                elif filename.startswith("sum_"):
+                    if self.prompt_managers['summary'].add_from_json(file_path):
+                        self.message_queue.append(
+                            f"成功加载提示词到summary: {filename}")
+                else:
+                    if self.prompt_managers['start'].add_from_json(file_path):
+                        self.message_queue.append(f"成功加载提示词到start: {filename}")
+                    if self.prompt_managers['continue'].add_from_json(file_path):
+                        self.message_queue.append(
+                            f"成功加载提示词到continue: {filename}")
+                    if self.prompt_managers['summary'].add_from_json(file_path):
+                        self.message_queue.append(
+                            f"成功加载提示词到summary: {filename}")

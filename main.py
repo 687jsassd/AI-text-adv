@@ -727,9 +727,9 @@ def new_game(no_auto_load=False):
         cmd_manager.reg("conclude_summary", cmd_conclude_summary, "总结摘要")
         cmd_manager.reg("new", lambda: 1, "开始新游戏")
         cmd_manager.reg("exit", lambda: 1, "退出游戏")
-    reg_cmds()
+    reg_cmds()  # 注册指令
 
-    commands = cmd_manager.cmds
+    commands = cmd_manager.cmds  # 获取指令列表
 
     clear_screen()
     print("等待读取..")
@@ -739,7 +739,7 @@ def new_game(no_auto_load=False):
         print(message)
     else:
         loadsuccess = False
-    if not loadsuccess:
+    if not loadsuccess:  # 新游戏逻辑
         input("按任意键开始新游戏")
         game_instance.custom_config.config_game()
         game_instance = GameEngine(config)  # 防止部分配置未加载？
@@ -752,6 +752,8 @@ def new_game(no_auto_load=False):
         # 游戏ID
         if not game_instance.game_id:
             game_instance.game_id = generate_game_id()
+
+    game_instance.load_custom_prompts()  # 读取自定义提示词
 
     while True:
         clear_screen()
@@ -792,6 +794,7 @@ def main():
     """
     game_title = GameTitle()
     game_title.show()
+    input()  # 用于捕获标题时玩家按的回车
 
     no_auto_load = False
     while True:
