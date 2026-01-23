@@ -49,7 +49,8 @@ def create_start_prompt():
         """
     }
     prompt_manager.load_init_sections(init_prompt)
-    prompt_manager.save_to_json("./prompts/start_prompt.json")
+    prompt_manager.save_to_json(
+        "./prompts/start_prompt.json", id="_INITIAL_START")
 
     prompt_manager = PromptManagerRebuild("./prompts/start_prompt.json")
     print(prompt_manager.get_full_prompt())
@@ -112,7 +113,8 @@ def create_continue_prompt():
         """
     }
     prompt_manager.load_init_sections(init_prompt)
-    prompt_manager.save_to_json("./prompts/continue_prompt.json")
+    prompt_manager.save_to_json(
+        "./prompts/continue_prompt.json", id="_INITIAL_CONTINUE")
 
     prompt_manager = PromptManagerRebuild("./prompts/continue_prompt.json")
     print(prompt_manager.get_full_prompt())
@@ -142,7 +144,8 @@ def create_summary_prompt():
         """
     }
     prompt_manager.load_init_sections(init_prompt)
-    prompt_manager.save_to_json("./prompts/summary_prompt.json")
+    prompt_manager.save_to_json(
+        "./prompts/summary_prompt.json", id='_INITIAL_SUMMARY')
 
     prompt_manager = PromptManagerRebuild("./prompts/summary_prompt.json")
     print(prompt_manager.get_full_prompt())

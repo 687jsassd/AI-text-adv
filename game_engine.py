@@ -14,8 +14,6 @@ import openai
 from rich import print
 from json_repair import repair_json
 from config import CustomConfig, CURRENT_TIME
-from libs.practical_funcs import (COLOR_RESET,
-                                  COLOR_YELLOW,)
 from libs.animes import SyncLoadingAnimation
 from libs.logger import log_exceptions
 from libs.prompt_manager import PromptManagerRebuild, PromptSection
@@ -312,7 +310,7 @@ class GameEngine:
             )
             self.anime_loader.stop_animation()
             self.anime_loader.start_animation(
-                "dot", message=COLOR_YELLOW+"正在总结历史剧情"+COLOR_RESET)
+                "dot", message="正在总结历史剧情")
             tmp = self.custom_config.max_tokens
             self.custom_config.max_tokens = 20480
             summary = self.call_ai(prompt)
@@ -341,7 +339,7 @@ class GameEngine:
         )
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation(
-            "dot", message=COLOR_YELLOW+"正在总结历史剧情"+COLOR_RESET)
+            "dot", message="正在总结历史剧情")
         tmp = self.custom_config.max_tokens
         self.custom_config.max_tokens = 2048
         summary = self.call_ai(prompt)

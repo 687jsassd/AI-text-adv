@@ -1,0 +1,26 @@
+{
+    "id": "custom1",
+    "description": "测试用",
+    "data": {
+        "PRE_PROMPT": {
+            "custom1": {
+                "content": "\n        ",
+                "is_system": false
+            }
+        },
+        "BODY_PROMPT": {
+            "custom1": {
+                "content": "\n        123456\n        ",
+                "is_system": false
+            }
+        },
+        "USER_INPUT": {},
+        "POST_PROMPT": {
+            "custom1": {
+                "content": "\n        ",
+                "is_system": false
+            }
+        }
+    },
+    "disabled": []
+}

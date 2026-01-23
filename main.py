@@ -717,7 +717,55 @@ def new_game(no_auto_load=False):
             no_save_again_sign = False
             print("总结完成")
 
+        def cmd_manage_prompts():
+            while True:
+                clear_screen()
+                print("当前已经添加的自定义提示词:")
+                for section, manager in game_instance.prompt_managers.items():
+                    print(f"{COLOR_YELLOW}{section}:{COLOR_RESET}")
+                    for prompt_id, desc in manager.json_prompt_loaded.items():
+                        print(f"{prompt_id}: {desc}")
+                print("""输入 *del section_id prompt_id 以删除指定部分的指定id的提示词
+*ab prompt_id:禁用/启用指定id的提示词
+exit:退出
+注意,仅对当前会话生效,重启后失效。mod管理器有待添加""")
+                cmd_input = input("::")
+                if cmd_input.startswith("*del"):
+                    parts = cmd_input.split()
+                    if len(parts) == 3:
+                        section_id, prompt_id = parts[1:]
+                        if section_id in game_instance.prompt_managers and prompt_id in game_instance.prompt_managers[section_id].json_prompt_loaded:
+                            game_instance.prompt_managers[section_id].remove_json_prompts_by_id(
+                                prompt_id)
+                            print(f"已删除 {section_id} 部分的 {prompt_id} 提示词")
+                        else:
+                            print(f"未找到 {section_id} 部分的 {prompt_id} 提示词")
+                    else:
+                        print("指令格式错误")
+                elif cmd_input.startswith("*ab"):
+                    parts = cmd_input.split()
+                    if len(parts) == 2:
+                        prompt_id = parts[1]
+                        if prompt_id in game_instance.prompt_managers[section_id].json_prompt_loaded:
+                            if prompt_id in game_instance.prompt_managers[section_id].id_disabled:
+                                game_instance.prompt_managers[section_id].id_disabled.remove(
+                                    prompt_id)
+                            else:
+                                game_instance.prompt_managers[section_id].id_disabled.add(
+                                    prompt_id)
+                            print(f"已禁用/启用 {section_id} 部分的 {prompt_id} 提示词")
+                        else:
+                            print(f"未找到 {section_id} 部分的 {prompt_id} 提示词")
+                    else:
+                        print("指令格式错误")
+                elif cmd_input == "exit":
+                    break
+                else:
+                    print("无效指令")
+
         cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
+        cmd_manager.reg("manage_custom_prompts",
+                        cmd_manage_prompts, "管理自定义提示词")
         cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
         cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
         cmd_manager.reg("config", cmd_config, "配置游戏")

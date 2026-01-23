@@ -35,6 +35,8 @@ class PromptManagerRebuild:
         self._section_orders: Dict[PromptSection, List[str]] = {
             section: [] for section in PromptSection
         }
+        self.json_prompt_loaded: Dict[str, str] = {}  # 加载了外部json的ID ->DESC
+        self.id_disabled = set()  # 禁用的json的ID
         # 初始化时传入文件地址，则自动加载JSON配置
         if file_path:
             self.load_from_json(file_path)
@@ -91,6 +93,16 @@ class PromptManagerRebuild:
         self._section_orders[section].remove(module_id)
         return True
 
+    def remove_json_prompts_by_id(self, id: str) -> bool:
+        if id not in self.json_prompt_loaded:
+            print(f"❌ 错误: ID '{id}' 未加载任何JSON文件")
+            return False
+        for section in PromptSection:
+            self.remove_prompt(section, id)
+
+        del self.json_prompt_loaded[id]
+        return True
+
     def move_prompt(self, section: PromptSection, module_id: str,
                     target_module_id: str, before: bool = True) -> bool:
         if module_id == "system":
@@ -118,7 +130,7 @@ class PromptManagerRebuild:
         order_list = self._section_orders[section]
         fragments = []
         for module_id in order_list:
-            if module_id in self._sections[section]:
+            if module_id in self._sections[section] and module_id not in self.id_disabled:
                 fragment = self._sections[section][module_id]
                 fragments.append(fragment.content)
         return "\n".join(fragments)
@@ -213,16 +225,24 @@ class PromptManagerRebuild:
                 manager._section_orders[section].append(module_id)
         return manager
 
-    def save_to_json(self, file_path: str) -> bool:
+    def save_to_json(self, file_path: str, id: str, desc: str = "") -> bool:
         """
         将当前提示词管理器的所有数据保存到JSON文件
         :param file_path: JSON文件保存路径
+        :param id : 该提示词集的ID
+        :param desc: 描述(写入json中description键)
         :return: 保存成功返回True，失败返回False
         """
         try:
             data = self.to_dict()
+            final_data = {
+                "id": id,
+                "description": desc,
+                "data": data,
+                "disabled": list(self.id_disabled)
+            }
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+                json.dump(final_data, f, ensure_ascii=False, indent=4)
             print(f"✅ 成功保存配置到: {file_path}")
             return True
         except PermissionError:
@@ -242,9 +262,13 @@ class PromptManagerRebuild:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            new_manager = self.from_dict(data)
+            new_manager = self.from_dict(data["data"])
             self._sections = new_manager._sections
             self._section_orders = new_manager._section_orders
+            self.json_prompt_loaded = {
+                data["id"]: data["description"]
+            }
+            self.id_disabled = set(data["disabled"])
             return True
         except FileNotFoundError:
             print(f"❌ 错误: 指定的文件 {file_path} 不存在")
@@ -269,12 +293,14 @@ class PromptManagerRebuild:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-            new_manager = self.from_dict(data)
+            new_manager = self.from_dict(data["data"])
             for section in PromptSection:
                 self._sections[section].update(
                     new_manager._sections[section])
                 self._section_orders[section].extend(
                     new_manager._section_orders[section])
+            self.json_prompt_loaded[data["id"]] = data["description"]
+            self.id_disabled.update(data["disabled"])
             return True
         except FileNotFoundError:
             print(f"❌ 错误: 指定的文件 {file_path} 不存在")
