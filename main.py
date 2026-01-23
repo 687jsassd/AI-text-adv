@@ -764,7 +764,7 @@ exit:退出
                     print("无效指令")
 
         cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
-        cmd_manager.reg("manage_custom_prompts",
+        cmd_manager.reg("m_prompts",
                         cmd_manage_prompts, "管理自定义提示词")
         cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
         cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
