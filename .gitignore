@@ -28,7 +28,9 @@ saves/
 # 配置文件（保留示例文件）
 config/config.json
 config/llm_api_config.json
+config/custom_prompt_mod_config.json
 !config/llm_api_config.example.json
+customprompt/
 
 # 一些不必要md文件
 CODEBUDDY.md

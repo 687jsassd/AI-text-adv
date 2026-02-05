@@ -16,11 +16,12 @@ from json_repair import repair_json
 from config import CustomConfig, CURRENT_TIME
 from libs.animes import SyncLoadingAnimation
 from libs.logger import log_exceptions
-from libs.prompt_manager import PromptManagerRebuild, PromptSection
+from libs.prompt_manager import PromptSection, PromptManager
+from libs.replace_manager import TextReplaceManager
 
 logger = logging.getLogger(__name__)
-
 AnimeLoader = SyncLoadingAnimation()
+ReplaceManager = TextReplaceManager()
 
 
 class GameEngine:
@@ -31,17 +32,19 @@ class GameEngine:
     def __init__(self, custom_config: Optional[CustomConfig] = None):
         # 基础部分
         self.game_id = ''
-        self.prompt_managers = {
-            'start': PromptManagerRebuild("./prompts/start_prompt.json"),
-            'continue': PromptManagerRebuild("./prompts/continue_prompt.json"),
-            'summary': PromptManagerRebuild("./prompts/summary_prompt.json")
-        }
+        self.prompt_manager = PromptManager({
+            'start': "./prompts/start_prompt.json",
+            'continue': "./prompts/continue_prompt.json",
+            'summary': "./prompts/summary_prompt.json"
+        })
+        self.prompt_manager.load_config_from_json()  # 恢复配置
         self.current_response = ""
         self.conversation_history = []
         self.history_descriptions = []  # 存储历史剧情
         self.history_choices = []  # 存储历史行动
         self.history_simple_summaries = []
         self.current_description = "游戏开始"
+        self.current_user_input = ""
 
         # 摘要压缩部分
         self.summary_conclude_val = 24  # 当历史剧情超过24条时，对其进行压缩总结;所有摘要都会参与剧情生成.
@@ -58,13 +61,41 @@ class GameEngine:
 
         # 用户配置
         self.custom_config = custom_config or CustomConfig()
-        self.player_name = self.custom_config.player_name
 
         # 动画
         self.anime_loader = AnimeLoader
 
         # 待显示消息的队列
         self.message_queue = deque()
+
+        # 注册默认替换规则和变量
+        default_replace_rules = {
+            "game:player_name": "{GAME:PLAYER_NAME}",
+            "game:player_story": "{GAME:PLAYER_STORY}",
+            "game:current_desc": "{GAME:CURRENT_DESC}",
+            "game:current_user_input": "{GAME:CURRENT_USER_INPUT}",
+            "game:last_3_desc": "{GAME:LAST_3_DESC}",
+            "game:pre_3_all_summary": "{GAME:PRE_3_ALL_SUMMARY}",
+            "user:custom_pre_prompt": "{USER:CUSTOM_PRE_PROMPT}",
+            "user:custom_body_prompt": "{USER:CUSTOM_BODY_PROMPT}",
+            "user:custom_post_prompt": "{USER:CUSTOM_POST_PROMPT}",
+            "user:preferences": "{USER:PREFERENCES}",
+        }
+        ReplaceManager.update_rule_dict(default_replace_rules)
+
+        default_values_dict = {
+            "GAME:PLAYER_NAME": lambda: self.custom_config.player_name,
+            "GAME:PLAYER_STORY": lambda: self.custom_config.player_story,
+            "GAME:LAST_3_DESC": lambda: "\n".join(self.history_descriptions[-4:-1]),
+            "GAME:PRE_3_ALL_SUMMARY": lambda: "\n".join(self.history_simple_summaries[:-4]),
+            "GAME:CURRENT_DESC": lambda: self.current_description,
+            "GAME:CURRENT_USER_INPUT": lambda: self.current_user_input,
+            "USER:CUSTOM_PRE_PROMPT": lambda: self.custom_config.custom_prompts['pre'],
+            "USER:CUSTOM_BODY_PROMPT": lambda: self.custom_config.custom_prompts['body'],
+            "USER:CUSTOM_POST_PROMPT": lambda: self.custom_config.custom_prompts['post'],
+            "USER:PREFERENCES": lambda: self.custom_config.get_preference_prompt()  # pylint: disable=unnecessary-lambda
+        }
+        ReplaceManager.update_values_dict(default_values_dict)
 
     # 基础-调用AI模型
     @log_exceptions(logger)
@@ -209,24 +240,24 @@ class GameEngine:
         开始游戏（第一轮）
         """
         logger.info("开始游戏: %s", st_story)
-        init_prompt = self.prompt_managers['start'].get_full_prompt(
+        if st_story:
+            self.history_simple_summaries.append(f"[开局故事]:{st_story}")
+        init_prompt = self.prompt_manager.get('start').get_full_prompt(
             extra_prompts={
-                PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}" + self.custom_config.get_preference_prompt() + self.custom_config.custom_prompts['pre'],
-                PromptSection.BODY_PROMPT: self.custom_config.custom_prompts['body'],
                 PromptSection.USER_INPUT: f"以{st_story if st_story else '一个完全随机的场景'}为故事开头，开始本局沉浸式文字游戏",
-                PromptSection.POST_PROMPT: self.custom_config.custom_prompts['post'],
             }
         )
-        ai_response = self.call_ai(init_prompt)
+        replaced_prompt = ReplaceManager.replace(init_prompt)
+        ai_response = self.call_ai(replaced_prompt)
         while not ai_response:
             input('无响应内容？任意键重试\n')
-            ai_response = self.call_ai(init_prompt)
+            ai_response = self.call_ai(replaced_prompt)
         if ai_response:
             ok_sign = self.parse_ai_response(ai_response)
             while not ok_sign:
                 self.anime_loader.stop_animation()
                 input(f"解析失败，按任意键重试.[注意Token消耗{self.total_tokens}]\n")
-                ai_response = self.call_ai(init_prompt)
+                ai_response = self.call_ai(replaced_prompt)
                 if ai_response:
                     ok_sign = self.parse_ai_response(ai_response)
         self.history_descriptions.append(self.current_description)
@@ -245,21 +276,9 @@ class GameEngine:
             self.conclude_summary()
             return 0
         if user_ipt:
-            prompt = self.prompt_managers['continue'].get_full_prompt(
-                extra_prompts={
-                    PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}" + self.custom_config.get_preference_prompt()+self.custom_config.custom_prompts['pre'],
-                    PromptSection.BODY_PROMPT: self.custom_config.custom_prompts['body'],
-                    PromptSection.POST_PROMPT: self.custom_config.custom_prompts['post'],
-                }
-            ).replace(
-                "{history_story}", '\n'.join(
-                    self.history_simple_summaries[:-5] + self.history_descriptions[-4:-1])
-            ).replace(
-                "{current_scene}", self.current_description
-            ).replace(
-                "{player_action}", user_ipt
-            )
-
+            self.current_user_input = user_ipt
+            prompt = self.prompt_manager.get('continue').get_full_prompt()
+            prompt = ReplaceManager.replace(prompt)
         if not prompt:
             logger.error("prompt为空")
             raise ValueError("prompt为空")
@@ -270,6 +289,7 @@ class GameEngine:
             ok_sign = self.parse_ai_response(ai_response)
             while not ok_sign:
                 input(f"解析失败，按任意键重试.[注意Token消耗{self.total_tokens}]")
+                print("请耐心等待重试")
                 ai_response = self.call_ai(prompt)
                 if ai_response:
                     ok_sign = self.parse_ai_response(ai_response)
@@ -302,12 +322,12 @@ class GameEngine:
         # 当所有摘要都经过了压缩，我们采取稀释旧摘要策略
         if not any(i and len(i) < self.compressed_summary_textmin for i in self.history_simple_summaries[:-1]):
             logger.info("使用稀释旧摘要策略")
-            prompt = self.prompt_managers['summary'].get_full_prompt(
+            prompt = self.prompt_manager.get('summary').get_full_prompt(
                 extra_prompts={
-                    PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name},玩家背景: {self.custom_config.player_story}",
                     PromptSection.USER_INPUT: f"历史剧情摘要: {'\n'.join([i for i in self.history_simple_summaries[:-10] if i])}"
                 }
             )
+            prompt = ReplaceManager.replace(prompt)
             self.anime_loader.stop_animation()
             self.anime_loader.start_animation(
                 "dot", message="正在总结历史剧情")
@@ -330,13 +350,13 @@ class GameEngine:
 
         # 否则，我们只总结新摘要，形成压缩摘要
         logger.info("使用压缩新摘要策略")
-        prompt = self.prompt_managers['summary'].get_full_prompt(
+        prompt = self.prompt_manager.get('summary').get_full_prompt(
             extra_prompts={
-                PromptSection.PRE_PROMPT: f"玩家姓名: {self.player_name}",
                 PromptSection.USER_INPUT: f"历史剧情摘要: {'\n'.join(
                     [i for i in self.history_simple_summaries if i and len(i) < self.compressed_summary_textmin])}",
             }
         )
+        prompt = ReplaceManager.replace(prompt)
         self.anime_loader.stop_animation()
         self.anime_loader.start_animation(
             "dot", message="正在总结历史剧情")
@@ -407,7 +427,7 @@ class GameEngine:
         new_narrative_file = os.path.join(game_dir, narrative_filename)
 
         with gzip.open(new_log_file, "wt", encoding="utf-8", errors="replace") as f:
-            safe_json_dump({"player_name": self.player_name}, f)
+            safe_json_dump({"player_name": self.custom_config.player_name}, f)
             safe_json_dump({"Time": CURRENT_TIME}, f)
             safe_json_dump({"token_usage": self.get_token_stats()}, f)
             for entry in self.conversation_history:
@@ -428,39 +448,6 @@ class GameEngine:
 
     def print_all_messages_await(self):
         """打印所有待显示消息"""
+        print()
         while self.message_queue:
             print(self.message_queue.popleft())
-
-    # 提示词管理器-自动加载customprompt文件夹下所有json文件(s_开头加载到start中，c_开头加载到continue中,sum_开头加载到summary中,其余的全部添加)
-
-    def load_custom_prompts(self):
-        """自动加载customprompt文件夹下所有json文件"""
-        custom_prompt_dir = os.path.join(
-            os.path.dirname(__file__), "customprompt")
-        if not os.path.exists(custom_prompt_dir):
-            logger.warning("customprompt文件夹不存在")
-            os.makedirs(custom_prompt_dir, exist_ok=True)
-            return
-        for filename in os.listdir(custom_prompt_dir):
-            if filename.endswith(".json"):
-                file_path = os.path.join(custom_prompt_dir, filename)
-                if filename.startswith("s_"):
-                    if self.prompt_managers['start'].add_from_json(file_path):
-                        self.message_queue.append(f"成功加载提示词到start: {filename}")
-                elif filename.startswith("c_"):
-                    if self.prompt_managers['continue'].add_from_json(file_path):
-                        self.message_queue.append(
-                            f"成功加载提示词到continue: {filename}")
-                elif filename.startswith("sum_"):
-                    if self.prompt_managers['summary'].add_from_json(file_path):
-                        self.message_queue.append(
-                            f"成功加载提示词到summary: {filename}")
-                else:
-                    if self.prompt_managers['start'].add_from_json(file_path):
-                        self.message_queue.append(f"成功加载提示词到start: {filename}")
-                    if self.prompt_managers['continue'].add_from_json(file_path):
-                        self.message_queue.append(
-                            f"成功加载提示词到continue: {filename}")
-                    if self.prompt_managers['summary'].add_from_json(file_path):
-                        self.message_queue.append(
-                            f"成功加载提示词到summary: {filename}")

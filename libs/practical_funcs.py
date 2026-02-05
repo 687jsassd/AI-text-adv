@@ -4,6 +4,8 @@
 # Copyright (c) 2025 [687jsassd]
 # MIT License
 
+from typing import Any, Dict
+import re
 import uuid
 import hashlib
 import os
@@ -73,7 +75,7 @@ def text_colorize(text: str):
             if rnccs and rnccs[-1] == close_chars[i]:
                 rnccs.pop()
             else:
-                print(f"\n[文本美化]注意：不符合预期的文本嵌套结构{text}\n 文本将不会被美化 \n按任意键继续")
+                print("\n[文本美化]注意：不符合预期的文本嵌套结构,文本将不会被美化")
                 return text
             if rcs:
                 rcs.pop()
@@ -116,3 +118,72 @@ def replace_color_code(text: str):
     for color, to_ansi in TO_ANSI_COLORS.items():
         text = text.replace(color, to_ansi)
     return text
+
+# 规则替换
+
+
+def rule_replace(text: str, rule_dict: Dict[str, Any], values_dict: Dict[str, Any] = None) -> str:
+    """
+    规则替换：对text文本，按照rule_dict中的规则进行替换
+
+    参数:
+        text: 原始文本
+        rule_dict: 替换规则字典，格式如 {"name": "张三", "age": "{age}"}
+        values_dict: 变量值字典，当rule_dict中的值以{var}格式时使用
+
+    返回:
+        替换后的文本
+
+    示例:
+        text = "你好，{name}，你今年{age}岁。"
+        rule_dict = {"name": "张三", "age": "{age}"}
+        values_dict = {"age": 18}
+        result = replace_rule(text, rule_dict, values_dict)
+        # 输出: 你好，张三，你今年18岁。
+
+    会抛出错误的情况:
+        - 变量值在values_dict中不存在(如有替换为{name}的规则,但values_dict中没有name)
+        - 变量值不能转为字符串
+    """
+    if values_dict is None:
+        values_dict = {}
+
+    processed_rules = {}
+
+    for key, value in rule_dict.items():
+        if isinstance(value, str) and value.startswith('{') and value.endswith('}'):
+            var_name = value[1:-1]
+            if var_name in values_dict:
+                processed_rules[key] = str(values_dict[var_name])
+            else:
+                raise ValueError(f"[规则替换]错误：变量'{var_name}'在values_dict中不存在")
+        else:
+            processed_rules[key] = str(value)
+
+    def replace_match(match):
+        key = match.group(1)
+        return processed_rules.get(key, match.group(0))
+    pattern = r'\{([^{}]+)\}'
+    return re.sub(pattern, replace_match, text)
+
+
+# 多行输入
+def get_multiline_input(prompt: str, end_marker: str = "---") -> str:
+    """
+    获取用户的多行输入（回车不提交，直到输入结束符/空行）
+
+    参数:
+        prompt: 输入提示语
+        end_marker: 结束输入的标记（默认---，用户单独输入该标记即结束）
+
+    返回:
+        拼接后的多行文本（行与行之间用\n分隔）
+    """
+    print(f"{prompt}\n（说明：每行输入后按回车继续，输入空行或单独输入'{end_marker}'后按回车结束输入）")
+    lines = []
+    while True:
+        line = input()
+        if not line or line.strip() == end_marker:
+            break
+        lines.append(line)
+    return "\n".join(lines)

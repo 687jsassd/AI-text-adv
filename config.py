@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from rich import print
 from libs.animes_rich import console
+from libs.practical_funcs import get_multiline_input
 
 
 if getattr(sys, 'frozen', False):
@@ -43,11 +44,11 @@ class CustomConfig:
 
     frequency_reflect = {
         0: "从不出现",
-        1: "很少出现",
-        2: "略有出现",
-        3: "中等频率出现",
-        4: "较高频率出现",
-        5: "频繁出现"
+        1: "偶尔出现",
+        2: "中等频率出现",
+        3: "较多出现",
+        4: "频繁出现",
+        5: "非常频繁地出现"
     }
     preference_reflect = {
         0: "色情和描述性行为的内容",
@@ -259,21 +260,21 @@ class CustomConfig:
                 print(f"2.温度 [{self.temperature}]")
                 print(f"3.频率惩罚 [{self.frequency_penalty}]")
                 print(f"4.存在惩罚 [{self.presence_penalty}]")
-                print(f"5.玩家姓名* [{self.player_name}]")
-                print(f"6.玩家故事* [{self.player_story}]")
+                print(f"5.玩家姓名 [{self.player_name}]")
+                print(f"6.玩家故事 [{self.player_story}]")
                 print(f"7.偏好:色情 [{self.frequency_reflect[self.porn_value]}]")
                 print(
                     f"8.偏好:特别暴力 [{self.frequency_reflect[self.violence_value]}]")
                 print(f"9.偏好:血腥 [{self.frequency_reflect[self.blood_value]}]")
                 print(
                     f"10.偏好:恐怖 [{self.frequency_reflect[self.horror_value]}]")
-                print(f"11.自定义附加提示词 {''.join([f'\n{name}:[{desc}]' for name, desc in zip(
+                print(f"11.自定义附加提示词 {''.join([f'\n{name}:+[{desc}]' for name, desc in zip(
                     ('前置词', '主体词', '后置词'), self.custom_prompts.values())])}")
                 current_provider = self.get_current_provider()
                 print(f"12.API提供商 [{current_provider.get('name', '未配置')}]")
                 print(f"   - 模型: {current_provider.get('model', '')}")
                 print(f"   - api地址: {current_provider.get('base_url', '')}")
-                print("[bright yellow]* 表示如果在游戏中修改，则需要重启游戏生效[/bright yellow]")
+                console.rule(style="bold magenta")
                 print("[red] exit. 退出配置(完成配置) [/red]")
 
                 while True:
@@ -310,7 +311,7 @@ class CustomConfig:
                         elif choice == 5:
                             self.player_name = input("输入玩家姓名：")
                         elif choice == 6:
-                            self.player_story = input("输入玩家故事：")
+                            self.player_story = get_multiline_input("输入玩家故事：")
                         elif choice == 7:
                             self.porn_value = int(input("输入色情偏好（0-5）："))
                         elif choice == 8:
@@ -322,13 +323,13 @@ class CustomConfig:
                         elif choice == 11:
                             which_p = input("输入要更改的自定义附加提示词(PRE/BODY/POST)：")
                             if which_p.strip().upper() == "PRE":
-                                self.custom_prompts['pre'] = input(
+                                self.custom_prompts['pre'] = get_multiline_input(
                                     "输入前置词：")
                             elif which_p.strip().upper() == "BODY":
-                                self.custom_prompts['body'] = input(
+                                self.custom_prompts['body'] = get_multiline_input(
                                     "输入主体词：")
                             elif which_p.strip().upper() == "POST":
-                                self.custom_prompts['post'] = input(
+                                self.custom_prompts['post'] = get_multiline_input(
                                     "输入后置词：")
                             else:
                                 print("无效的选项ID，请重新输入。")

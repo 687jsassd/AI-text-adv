@@ -47,7 +47,7 @@ else:
 os.chdir(root_path)
 
 
-VERSION = "Reborn-v0.1.8"
+VERSION = "Reborn-v0.1.9"
 
 
 # 额外数据，存储回合数等必要的需要持久化的信息
@@ -108,8 +108,8 @@ def save_game(game_engine, extra_datas: ExtraData, save_name="autosave", is_manu
             "save_desc": save_name,
             "game_id": game_engine.game_id,
             "timestamp": datetime.now().isoformat(),
+            "player_name": game_engine.custom_config.player_name,  # 仅作显示用，不影响游戏逻辑
             # 基础变量
-            "player_name": game_engine.player_name,
             "current_response": game_engine.current_response,
             "current_description": game_engine.current_description,
             "history_descriptions": game_engine.history_descriptions,
@@ -640,6 +640,16 @@ def custom_action_func(game: GameEngine, skip_inputs: Tuple = ('help',)):
         else:
             print("无效指令")
     else:
+        # 有斜杠，执行确认一下
+        if '/' in custom_action:
+            confirm = input("输入了带/的语句,确定要视为自定义行动执行？[y/n]")
+            if not confirm.strip() or confirm.strip().lower() != 'y':
+                return ""
+        # 没有任何一个中文，执行确认一下
+        if not any('\u4e00' <= char <= '\u9fff' for char in custom_action):
+            confirm = input("输入不含中文,确定要视为自定义行动执行？[y/n]")
+            if not confirm.strip() or confirm.strip().lower() != 'y':
+                return ""
         if custom_action.strip() == "":
             print("自定义行动取消")
             return ""
@@ -717,55 +727,9 @@ def new_game(no_auto_load=False):
             no_save_again_sign = False
             print("总结完成")
 
-        def cmd_manage_prompts():
-            while True:
-                clear_screen()
-                print("当前已经添加的自定义提示词:")
-                for section, manager in game_instance.prompt_managers.items():
-                    print(f"{COLOR_YELLOW}{section}:{COLOR_RESET}")
-                    for prompt_id, desc in manager.json_prompt_loaded.items():
-                        print(f"{prompt_id}: {desc}")
-                print("""输入 *del section_id prompt_id 以删除指定部分的指定id的提示词
-*ab prompt_id:禁用/启用指定id的提示词
-exit:退出
-注意,仅对当前会话生效,重启后失效。mod管理器有待添加""")
-                cmd_input = input("::")
-                if cmd_input.startswith("*del"):
-                    parts = cmd_input.split()
-                    if len(parts) == 3:
-                        section_id, prompt_id = parts[1:]
-                        if section_id in game_instance.prompt_managers and prompt_id in game_instance.prompt_managers[section_id].json_prompt_loaded:
-                            game_instance.prompt_managers[section_id].remove_json_prompts_by_id(
-                                prompt_id)
-                            print(f"已删除 {section_id} 部分的 {prompt_id} 提示词")
-                        else:
-                            print(f"未找到 {section_id} 部分的 {prompt_id} 提示词")
-                    else:
-                        print("指令格式错误")
-                elif cmd_input.startswith("*ab"):
-                    parts = cmd_input.split()
-                    if len(parts) == 2:
-                        prompt_id = parts[1]
-                        if prompt_id in game_instance.prompt_managers[section_id].json_prompt_loaded:
-                            if prompt_id in game_instance.prompt_managers[section_id].id_disabled:
-                                game_instance.prompt_managers[section_id].id_disabled.remove(
-                                    prompt_id)
-                            else:
-                                game_instance.prompt_managers[section_id].id_disabled.add(
-                                    prompt_id)
-                            print(f"已禁用/启用 {section_id} 部分的 {prompt_id} 提示词")
-                        else:
-                            print(f"未找到 {section_id} 部分的 {prompt_id} 提示词")
-                    else:
-                        print("指令格式错误")
-                elif cmd_input == "exit":
-                    break
-                else:
-                    print("无效指令")
-
         cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
-        cmd_manager.reg("m_prompts",
-                        cmd_manage_prompts, "管理自定义提示词")
+        cmd_manager.reg("mod",
+                        game_instance.prompt_manager.action_menu, "管理自定义提示词")
         cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
         cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
         cmd_manager.reg("config", cmd_config, "配置游戏")
@@ -801,15 +765,13 @@ exit:退出
         if not game_instance.game_id:
             game_instance.game_id = generate_game_id()
 
-    game_instance.load_custom_prompts()  # 读取自定义提示词
-
     while True:
         clear_screen()
         print_all_history(game_instance)
         print(text_colorize(game_instance.current_description))
         game_instance.print_all_messages_await()
         print(
-            f"字数:{sum([len(it) for it in game_instance.history_descriptions])} | Token/all:{game_instance.l_c_token+game_instance.l_p_token}/{game_instance.total_tokens} | Ver:{VERSION} | [{game_instance.game_id}]")
+            f"字数:{sum([len(it) for it in game_instance.history_descriptions])} | Token/all:{game_instance.l_c_token+game_instance.l_p_token}/{game_instance.total_tokens} | Ver:{VERSION} | [{game_instance.game_id}] | {len(game_instance.prompt_manager.loaded_prompt_jsons)} mods loaded")
 
         if show_init_resp:
             print(game_instance.current_response)
@@ -840,9 +802,11 @@ def main():
     """
     主函数，游戏入口
     """
-    game_title = GameTitle()
-    game_title.show()
-    input()  # 用于捕获标题时玩家按的回车
+    # 如果是linux，就不放动画,避免权限不足的报错
+    if sys.platform != "linux":
+        game_title = GameTitle()
+        game_title.show()
+        input()  # 用于捕获标题时玩家按的回车
 
     no_auto_load = False
     while True:
