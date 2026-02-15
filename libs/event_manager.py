@@ -68,6 +68,3 @@ class CommandManager:
         """
         for cmd in self._cmds:
             print(f"{cmd}: {self._cmd_desc[cmd]}")
-
-
-cmd_manager = CommandManager()

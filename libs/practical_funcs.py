@@ -168,18 +168,18 @@ def rule_replace(text: str, rule_dict: Dict[str, Any], values_dict: Dict[str, An
 
 
 # 多行输入
-def get_multiline_input(prompt: str, end_marker: str = "---") -> str:
+def get_multiline_input(prompt: str = '::', end_marker: str = "---") -> str:
     """
     获取用户的多行输入（回车不提交，直到输入结束符/空行）
 
     参数:
-        prompt: 输入提示语
+        prompt: 输入提示语(注意,不会自动换行)
         end_marker: 结束输入的标记（默认---，用户单独输入该标记即结束）
 
     返回:
         拼接后的多行文本（行与行之间用\n分隔）
     """
-    print(f"{prompt}\n（说明：每行输入后按回车继续，输入空行或单独输入'{end_marker}'后按回车结束输入）")
+    print(f"（输入空行或单独输入'{end_marker}'后回车结束输入）\n{prompt}", end='')
     lines = []
     while True:
         line = input()

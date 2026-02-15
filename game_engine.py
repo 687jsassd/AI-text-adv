@@ -10,6 +10,7 @@ import logging
 import gzip
 from collections import deque
 from typing import Optional
+from datetime import datetime
 import openai
 from rich import print
 from json_repair import repair_json
@@ -18,10 +19,42 @@ from libs.animes import SyncLoadingAnimation
 from libs.logger import log_exceptions
 from libs.prompt_manager import PromptSection, PromptManager
 from libs.replace_manager import TextReplaceManager
+from libs.practical_funcs import generate_game_id, find_file_by_name, clear_screen
+from libs.event_manager import CommandManager
+from libs.token_ana import analyze_token_consume
 
 logger = logging.getLogger(__name__)
 AnimeLoader = SyncLoadingAnimation()
 ReplaceManager = TextReplaceManager()
+CommandManager = CommandManager()
+
+VERSION = "Reborn-v0.1.9"
+
+
+class ExtraData:
+    """
+    引擎用，额外数据，存储回合数等必要的需要持久化的信息
+    """
+
+    def __init__(self):
+        self.turns = 0
+
+        # 不参与持久化
+        self.show_init_resp = False
+
+    def read_from_dict(self, extra_datas: dict):
+        """
+        从字典读取额外数据
+        """
+        self.turns = extra_datas.get("turns", 0)
+
+    def to_dict(self) -> dict:
+        """
+        转换为字典
+        """
+        return {
+            "turns": self.turns,
+        }
 
 
 class GameEngine:
@@ -68,6 +101,9 @@ class GameEngine:
         # 待显示消息的队列
         self.message_queue = deque()
 
+        # 额外数据
+        self.extra_data = ExtraData()
+
         # 注册默认替换规则和变量
         default_replace_rules = {
             "game:player_name": "{GAME:PLAYER_NAME}",
@@ -76,6 +112,7 @@ class GameEngine:
             "game:current_user_input": "{GAME:CURRENT_USER_INPUT}",
             "game:last_3_desc": "{GAME:LAST_3_DESC}",
             "game:pre_3_all_summary": "{GAME:PRE_3_ALL_SUMMARY}",
+            "game:compressed_summary_textmin": "{GAME:COMPRESSED_SUMMARY_TEXTMIN}",
             "user:custom_pre_prompt": "{USER:CUSTOM_PRE_PROMPT}",
             "user:custom_body_prompt": "{USER:CUSTOM_BODY_PROMPT}",
             "user:custom_post_prompt": "{USER:CUSTOM_POST_PROMPT}",
@@ -87,9 +124,16 @@ class GameEngine:
             "GAME:PLAYER_NAME": lambda: self.custom_config.player_name,
             "GAME:PLAYER_STORY": lambda: self.custom_config.player_story,
             "GAME:LAST_3_DESC": lambda: "\n".join(self.history_descriptions[-4:-1]),
-            "GAME:PRE_3_ALL_SUMMARY": lambda: "\n".join(self.history_simple_summaries[:-4]),
+            "GAME:PRE_3_ALL_SUMMARY": lambda: "\n".join(
+                # 条件2：所有长度大于self.compressed_summary_textmin的字符串（前置）
+                [s for s in self.history_simple_summaries if len(s) > self.compressed_summary_textmin] +
+                # 条件1：[:-4]范围内且长度小于self.compressed_summary_textmin的字符串（后置）
+                [s for s in self.history_simple_summaries[:-4]
+                    if len(s) < self.compressed_summary_textmin]
+            ),
             "GAME:CURRENT_DESC": lambda: self.current_description,
             "GAME:CURRENT_USER_INPUT": lambda: self.current_user_input,
+            "GAME:COMPRESSED_SUMMARY_TEXTMIN": lambda: str(self.compressed_summary_textmin),
             "USER:CUSTOM_PRE_PROMPT": lambda: self.custom_config.custom_prompts['pre'],
             "USER:CUSTOM_BODY_PROMPT": lambda: self.custom_config.custom_prompts['body'],
             "USER:CUSTOM_POST_PROMPT": lambda: self.custom_config.custom_prompts['post'],
@@ -97,7 +141,11 @@ class GameEngine:
         }
         ReplaceManager.update_values_dict(default_values_dict)
 
+        # 注册默认命令
+        self.register_default_commands()
+
     # 基础-调用AI模型
+
     @log_exceptions(logger)
     def call_ai(self, prompt: str):
         """
@@ -451,3 +499,556 @@ class GameEngine:
         print()
         while self.message_queue:
             print(self.message_queue.popleft())
+
+    # 保存-管理自动存档
+    @log_exceptions(logger)
+    def manage_auto_saves(self, save_name="autosave"):
+        """管理自动保存，只保留最近的5个存档"""
+        save_dir = "saves"
+        game_save_dir = os.path.join(save_dir, self.game_id)
+
+        if not os.path.exists(game_save_dir):
+            return
+
+        # 获取所有自动保存文件
+        auto_save_files = []
+        for f in os.listdir(game_save_dir):
+            if (f.startswith(save_name) and
+                not f.startswith('manual_') and
+                not f.endswith('_latest.json') and
+                not f.endswith('_latest.json.gz') and
+                    f.endswith(('.json', '.json.gz'))):
+                auto_save_files.append(f)
+        logger.info("找到了%s个自动保存文件", len(auto_save_files))
+
+        if len(auto_save_files) > 5:
+            def get_file_timestamp(filename):
+                parts = filename.replace(
+                    '.json', '').replace('.gz', '').split('_')
+                for part in parts:
+                    if len(part) == 15 and part[:8].isdigit() and part[9:].isdigit():
+                        return part
+                return filename
+
+            auto_save_files.sort(key=get_file_timestamp)
+            files_to_delete = auto_save_files[:-5]
+
+            for filename in files_to_delete:
+                filepath = os.path.join(game_save_dir, filename)
+                os.remove(filepath)
+                logger.info("自动删除旧存档: %s", filepath)
+
+    # 保存-保存游戏
+    @log_exceptions(logger)
+    def save_game(self, save_name="autosave", is_manual_save=False):
+        """
+        保存游戏状态到文件（使用gzip压缩）
+        """
+        try:
+            # 创建保存目录
+            save_dir = "saves"
+            if not os.path.exists(save_dir):
+                logger.info("创建保存目录 %s", save_dir)
+                os.makedirs(save_dir)
+
+            # 获取或生成游戏ID
+            if not self.game_id:
+                self.game_id = generate_game_id()
+                logger.info("生成游戏ID %s", self.game_id)
+
+            # 创建游戏专属目录
+            game_save_dir = os.path.join(save_dir, self.game_id)
+            if not os.path.exists(game_save_dir):
+                logger.info("创建游戏专属目录 %s", game_save_dir)
+                os.makedirs(game_save_dir)
+
+            save_data = {
+                "version": VERSION,
+                "save_desc": save_name,
+                "game_id": self.game_id,
+                "timestamp": datetime.now().isoformat(),
+                "player_name": self.custom_config.player_name,
+                # 基础变量
+                "current_response": self.current_response,
+                "current_description": self.current_description,
+                "history_descriptions": self.history_descriptions,
+                "history_choices": self.history_choices,
+                "history_simple_summaries": self.history_simple_summaries,
+                "conversation_history": self.conversation_history,
+                # 摘要压缩相关
+                "summary_conclude_val": self.summary_conclude_val,
+                "conclude_summary_cooldown": self.conclude_summary_cooldown,
+                # Token统计
+                "total_prompt_tokens": self.total_prompt_tokens,
+                "last_prompt_tokens": self.l_p_token,
+                "total_completion_tokens": self.total_completion_tokens,
+                "last_completion_tokens": self.l_c_token,
+                "total_tokens": self.total_tokens,
+                "token_consumes": self.token_consumes,
+                # 自定义配置（保留）
+                "custom_config": {
+                    "max_tokens": self.custom_config.max_tokens,
+                    "temperature": self.custom_config.temperature,
+                    "frequency_penalty": self.custom_config.frequency_penalty,
+                    "presence_penalty": self.custom_config.presence_penalty,
+                    "player_name": self.custom_config.player_name,
+                    "player_story": self.custom_config.player_story,
+                    "porn_value": self.custom_config.porn_value,
+                    "violence_value": self.custom_config.violence_value,
+                    "blood_value": self.custom_config.blood_value,
+                    "horror_value": self.custom_config.horror_value,
+                    "custom_prompts": self.custom_config.custom_prompts,
+                    "api_provider_choice": self.custom_config.api_provider_choice,
+                },
+                # 其他拓展变量
+                "message_queue": list(self.message_queue),
+                "total_turns": len(self.history_descriptions),
+                "extra_datas": self.extra_data.to_dict(),
+            }
+
+            # 生成文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if is_manual_save:
+                filename = f"manual_{save_name}_{timestamp}.json.gz"
+            else:
+                filename = f"{save_name}_{timestamp}.json.gz"
+            filepath = os.path.join(game_save_dir, filename)
+            logger.info("保存游戏数据到 %s", filepath)
+
+            # 保存到压缩文件
+            with gzip.open(filepath, 'wt', encoding='utf-8') as f:
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+            logger.info("游戏数据保存完成")
+
+            # 更新最新保存文件
+            latest_file = os.path.join(
+                game_save_dir, f"{save_name}_latest.json.gz")
+            with gzip.open(latest_file, 'wt', encoding='utf-8') as f:
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+            logger.info("最新保存文件 %s 更新完成", latest_file)
+
+            # 如果不是手动保存，进行自动存档管理
+            if not is_manual_save:
+                logger.info("自动保存-开始管理自动保存")
+                self.manage_auto_saves(save_name)
+
+            return True, f"游戏已保存到 {self.game_id}/{filename}"
+
+        except Exception as e:
+            logger.error("保存失败: %s", str(e))
+            return False, f"保存失败: {str(e)}"
+
+    # 读取-查找最新存档
+    @log_exceptions(logger)
+    def find_latest_save(self, save_dir, save_name="autosave", include_manual=False):
+        """查找所有游戏中最新的存档文件"""
+        all_candidates = []
+        added_files = set()
+        logger.info("查找最新存档 | 根目录: %s | 前缀: %s", save_dir, save_name)
+
+        if not os.path.exists(save_dir):
+            logger.error("存档目录不存在: %s", save_dir)
+            return None
+
+        # 遍历所有游戏目录收集候选
+        for game_id in os.listdir(save_dir):
+            game_save_dir = os.path.join(save_dir, game_id)
+            if not os.path.isdir(game_save_dir):
+                continue
+
+            # 处理latest文件
+            latest_file = os.path.join(
+                game_save_dir, f"{save_name}_latest.json.gz")
+            if os.path.exists(latest_file) and latest_file not in added_files:
+                try:
+                    with gzip.open(latest_file, 'rt', encoding='utf-8') as f:
+                        save_data = json.load(f)
+                    if "timestamp" in save_data:
+                        save_time = datetime.fromisoformat(
+                            save_data["timestamp"])
+                        ts_str = datetime.fromisoformat(
+                            save_data["timestamp"]).strftime("%Y%m%d_%H%M%S")
+                        actual_file = os.path.join(
+                            game_save_dir, f"{save_name}_{ts_str}.json.gz")
+                        if os.path.exists(actual_file) and actual_file not in added_files:
+                            all_candidates.append((save_time, actual_file))
+                            added_files.add(actual_file)
+                        else:
+                            all_candidates.append((save_time, latest_file))
+                            added_files.add(latest_file)
+                except Exception as e:
+                    logger.error("解析latest文件失败: %s | %s", latest_file, e)
+
+            # 处理实际存档文件
+            for filename in os.listdir(game_save_dir):
+                filepath = os.path.join(game_save_dir, filename)
+                if (filepath in added_files or not filename.endswith(".json.gz") or
+                    filename.endswith("_latest.json.gz") or
+                        not (filename.startswith(f"{save_name}_") or (include_manual and filename.startswith(f"manual_{save_name}_")))):
+                    continue
+
+                try:
+                    with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                        save_data = json.load(f)
+                    if "timestamp" in save_data:
+                        save_time = datetime.fromisoformat(
+                            save_data["timestamp"])
+                        all_candidates.append((save_time, filepath))
+                        added_files.add(filepath)
+                except Exception as e:
+                    logger.error("解析存档失败: %s | %s", filepath, e)
+
+        # 全局排序找最新
+        if all_candidates:
+            all_candidates.sort(key=lambda x: x[0], reverse=True)
+            latest_time, latest_save = all_candidates[0]
+            logger.info("最新存档: %s | 时间: %s", latest_save,
+                        latest_time.strftime('%Y-%m-%d %H:%M:%S'))
+            return latest_save
+        else:
+            logger.warning("未找到有效存档")
+            return None
+
+    # 读取-列出所有存档
+    @log_exceptions(logger)
+    def list_saves(self):
+        """
+        列出所有保存文件
+        """
+        save_dir = "saves"
+        if not os.path.exists(save_dir):
+            return []
+
+        save_info = []
+
+        # 遍历所有游戏目录
+        for game_id in os.listdir(save_dir):
+            try:
+                game_save_dir = os.path.join(save_dir, game_id)
+                if not os.path.isdir(game_save_dir):
+                    continue
+
+                save_files = [
+                    f for f in os.listdir(game_save_dir)
+                    if f.endswith(('.json', '.json.gz'))
+                    and not f.startswith('.')
+                ]
+
+                for filename in save_files:
+                    filepath = os.path.join(game_save_dir, filename)
+                    if filename.endswith('.gz'):
+                        with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                            save_data = json.load(f)
+                    else:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            save_data = json.load(f)
+
+                    timestamp = datetime.fromisoformat(
+                        save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+                    save_desc = save_data.get("save_desc", "autosave")
+                    save_info.append({
+                        "game_id": game_id,
+                        "filename": filename,
+                        "player_name": save_data["player_name"],
+                        "timestamp": timestamp,
+                        "total_turns": save_data["total_turns"],
+                        "save_type": "manual" if filename.startswith("manual_") else "auto",
+                        "save_desc": save_desc,
+                        "ver": save_data["version"],
+                        "file_format": "gzip" if filename.endswith('.gz') else "plain"
+                    })
+            except Exception as e:
+                logger.error("解析存档 %s 失败: %s", game_id, e)
+                continue
+
+        save_info.sort(key=lambda x: x["timestamp"], reverse=True)
+        return save_info
+
+    # 读取-加载游戏
+    @log_exceptions(logger)
+    def load_game(self, save_name="autosave", filename=None, game_id=None):
+        """
+        从文件加载游戏状态
+        """
+        try:
+            save_dir = "saves"
+            if not os.path.exists(save_dir):
+                logger.info("没有找到保存文件目录")
+                return False, "没有找到保存文件目录"
+
+            # 确定要加载的文件
+            if filename and game_id:
+                if not filename.endswith(('.json', '.json.gz')):
+                    filepath = os.path.join(
+                        save_dir, game_id, f"{filename}.json.gz")
+                else:
+                    filepath = os.path.join(save_dir, game_id, filename)
+            elif filename:
+                filepath = find_file_by_name(save_dir, filename)
+                if not filepath:
+                    filepath = find_file_by_name(save_dir, f"{filename}.gz")
+                    if not filepath:
+                        return False, f"没有找到保存文件 {filename}（含压缩版本）"
+            else:
+                if game_id:
+                    game_save_dir = os.path.join(save_dir, game_id)
+                    if not os.path.exists(game_save_dir):
+                        return False, f"没有找到游戏 {game_id} 的保存目录"
+                    filepath = os.path.join(
+                        game_save_dir, f"{save_name}_latest.json.gz")
+                    if not os.path.exists(filepath):
+                        filepath = os.path.join(
+                            game_save_dir, f"{save_name}_latest.json")
+                else:
+                    filepath = self.find_latest_save(save_dir, save_name)
+                    if not filepath:
+                        filepath = self.find_latest_save(
+                            save_dir, f"{save_name}.gz")
+                        if not filepath:
+                            return False, f"没有找到 {save_name} 的保存文件（含压缩版本）"
+
+            if not os.path.exists(filepath):
+                logger.info("保存文件不存在: %s", filepath)
+                return False, f"保存文件不存在: {filepath}"
+
+            # 读取保存数据
+            save_data = None
+            if filepath.endswith('.gz'):
+                with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                    save_data = json.load(f)
+                logger.info("成功读取压缩存档: %s", filepath)
+            else:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    save_data = json.load(f)
+                logger.info("成功读取未压缩存档: %s", filepath)
+
+            # 版本检查
+            if save_data["version"] != VERSION:
+                logger.warning("存档版本不匹配: 存档版本 %s, 游戏版本 %s",
+                               save_data["version"], VERSION)
+                tmp = input(
+                    f"\n[警告]:最新存档具有不匹配的版本号(存档{save_data['version']} -- 游戏{VERSION})\n 强制读取？(y/n)")
+                if tmp.lower() != "y":
+                    return False, "版本号不匹配"
+                else:
+                    logger.warning("强制读取存档")
+
+            # 恢复基础变量
+            self.extra_data.read_from_dict(save_data["extra_datas"])
+            self.game_id = save_data["game_id"]
+            self.custom_config.player_name = save_data["player_name"]
+            self.current_response = save_data.get("current_response", "")
+            self.current_description = save_data["current_description"]
+            self.history_descriptions = save_data["history_descriptions"]
+            self.history_choices = save_data["history_choices"]
+            self.history_simple_summaries = save_data["history_simple_summaries"]
+            self.conversation_history = save_data["conversation_history"]
+
+            # 恢复摘要压缩相关
+            self.summary_conclude_val = save_data.get(
+                "summary_conclude_val", 24)
+            self.conclude_summary_cooldown = save_data["conclude_summary_cooldown"]
+
+            # 恢复Token统计
+            self.total_prompt_tokens = save_data["total_prompt_tokens"]
+            self.l_p_token = save_data["last_prompt_tokens"]
+            self.total_completion_tokens = save_data["total_completion_tokens"]
+            self.l_c_token = save_data["last_completion_tokens"]
+            self.total_tokens = save_data["total_tokens"]
+            self.token_consumes = save_data["token_consumes"]
+
+            # 恢复自定义配置
+            config_data = save_data["custom_config"]
+            self.custom_config.max_tokens = config_data["max_tokens"]
+            self.custom_config.temperature = config_data["temperature"]
+            self.custom_config.frequency_penalty = config_data["frequency_penalty"]
+            self.custom_config.presence_penalty = config_data["presence_penalty"]
+            self.custom_config.player_name = config_data["player_name"]
+            self.custom_config.player_story = config_data["player_story"]
+            self.custom_config.porn_value = config_data["porn_value"]
+            self.custom_config.violence_value = config_data["violence_value"]
+            self.custom_config.blood_value = config_data["blood_value"]
+            self.custom_config.horror_value = config_data["horror_value"]
+            self.custom_config.custom_prompts = config_data["custom_prompts"]
+            if "api_provider_choice" in config_data:
+                self.custom_config.api_provider_choice = config_data["api_provider_choice"]
+
+            # 恢复其他拓展变量
+            self.message_queue = deque(save_data["message_queue"])
+
+            # 格式化时间并返回结果
+            timestamp = datetime.fromisoformat(
+                save_data["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+            logger.info("成功加载存档: 游戏ID %s, 保存时间 %s",
+                        save_data['game_id'], timestamp)
+            return True, f"游戏已加载 (游戏ID: {save_data['game_id']}, 保存时间: {timestamp})"
+
+        except Exception as e:
+            logger.error("加载存档时发生错误: %s", str(e))
+            return False, f"加载失败: {str(e)}"
+
+    # 手动保存
+    def manual_save(self):
+        """
+        手动保存游戏，允许用户输入保存名称
+        """
+        save_name = input("输入保存名称（留空使用默认名称）: ").strip()
+        if not save_name:
+            save_name = "manual_save"
+
+        success, message = self.save_game(save_name, is_manual_save=True)
+        print(message)
+        return success
+
+    # 手动加载
+    def manual_load(self):
+        """
+        手动加载游戏，分两级选择
+        """
+        all_saves = self.list_saves()
+        if not all_saves:
+            print("没有找到保存文件")
+            return False
+
+        current_game_id = self.game_id if self.game_id else ""
+
+        current_saves = [
+            s for s in all_saves if s["game_id"] == current_game_id]
+        other_saves = [s for s in all_saves if s["game_id"] != current_game_id]
+        other_game_ids = sorted(
+            list(set([s["game_id"] for s in other_saves])), reverse=False)
+
+        print("\n===== 选择游戏存档组 =====")
+        for i, game_id in enumerate(other_game_ids, 1):
+            save_count = len(
+                [s for s in other_saves if s["game_id"] == game_id])
+            print(f"{i}. 游戏ID: {game_id} (存档数量: {save_count})")
+
+        current_option_idx = len(other_game_ids) + 1
+        if current_game_id and current_saves:
+            print(
+                f"{current_option_idx}. 当前游戏ID: {current_game_id} (存档数量: {len(current_saves)})")
+        elif current_game_id and not current_saves:
+            print(f"{current_option_idx}. 当前游戏ID: {current_game_id} (无存档)")
+
+        cancel_idx = len(other_game_ids) + (1 if current_game_id else 0) + 1
+        print(f"{cancel_idx}. 取消")
+
+        try:
+            first_choice = input(f"\n请选择存档组编号（1-{cancel_idx}）: ")
+            if first_choice == str(cancel_idx):
+                return False
+
+            first_choice_idx = int(first_choice)
+            max_valid_idx = len(other_game_ids) + (1 if current_game_id else 0)
+            if first_choice_idx < 1 or first_choice_idx > max_valid_idx:
+                print("无效的选择编号")
+                return False
+
+            if first_choice_idx <= len(other_game_ids):
+                selected_game_id = other_game_ids[first_choice_idx - 1]
+            else:
+                selected_game_id = current_game_id
+
+            target_saves = [
+                s for s in all_saves if s["game_id"] == selected_game_id]
+            if not target_saves:
+                print(f"游戏ID {selected_game_id} 下无可用存档")
+                return False
+
+            print(f"\n===== 选择 {selected_game_id} 的具体存档 =====")
+            for i, save in enumerate(target_saves, 1):
+                save_type = "手动" if save['save_type'] == 'manual' else "自动"
+                print(
+                    f"{i}. {save['game_id']}-{save['player_name']}-回合{save['total_turns']}-{save_type}"
+                    f" (存档时间: {save['timestamp']})"
+                )
+
+            second_choice = input("\n选择要加载的存档编号（输入0取消）: ")
+            if second_choice == "0":
+                return False
+
+            second_choice_idx = int(second_choice) - 1
+            if 0 <= second_choice_idx < len(target_saves):
+                selected_save = target_saves[second_choice_idx]
+                success, message = self.load_game(
+                    filename=selected_save["filename"],
+                    game_id=selected_save["game_id"]
+                )
+                print(message)
+                return success
+            else:
+                print("无效的存档编号")
+                return False
+
+        except ValueError:
+            print("请输入有效的数字")
+            return False
+        except Exception as e:
+            print(f"加载存档过程中出错: {e}")
+            logger.error("手动加载存档失败", exc_info=e)
+            return False
+
+    # 命令-注册默认游戏指令
+    def register_default_commands(self):
+        """
+        注册游戏指令到命令管理器
+        """
+        cmd_manager = CommandManager
+
+        def cmd_summary():
+            clear_screen()
+            print("<剧情摘要>")
+            print("\n".join(
+                [f"{i+1}. {it}" for i, it in enumerate(list(self.history_simple_summaries))]))
+
+        def cmd_ana_token():
+            analyze_token_consume(self.token_consumes)
+
+        def cmd_show_init_resp():
+            self.extra_data.show_init_resp = not self.extra_data.show_init_resp
+            print(f"将显示AI原始响应与Token信息：{self.extra_data.show_init_resp}")
+            return self.extra_data.show_init_resp
+
+        def cmd_config():
+            self.custom_config.config_game()
+
+        def cmd_load():
+            loadsuccess = self.manual_load()
+            if loadsuccess:
+                print("成功加载，按任意键继续...")
+            else:
+                print("加载失败，按任意键继续...")
+
+        def cmd_save():
+            self.manual_save()
+
+        def cmd_conclude_summary():
+            self.go_game("", True)
+            print("总结完成")
+
+        cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
+        cmd_manager.reg("mod",
+                        self.prompt_manager.action_menu, "管理自定义提示词")
+        cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
+        cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
+        cmd_manager.reg("config", cmd_config, "配置游戏")
+        cmd_manager.reg("load", cmd_load, "读取存档")
+        cmd_manager.reg("save", cmd_save, "保存")
+        cmd_manager.reg("summary", cmd_summary, "查看当前剧情摘要")
+        cmd_manager.reg("conclude_summary", cmd_conclude_summary, "总结摘要")
+        cmd_manager.reg("new", lambda: 1, "开始新游戏")
+        cmd_manager.reg("exit", lambda: 1, "退出游戏")
+
+        return self.extra_data.show_init_resp
+
+    # 游戏日志-记录游戏
+    def log_game_file(self, log_file: str):
+        """记录游戏信息到日志文件"""
+        return self.log_game(log_file)
+
+    # 获取版本号
+    @property
+    def version(self):
+        """获取游戏版本号"""
+        return VERSION

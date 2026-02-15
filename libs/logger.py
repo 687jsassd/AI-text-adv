@@ -2,7 +2,7 @@
 日志拓展
 """
 # Copyright (c) 2025 [687jsassd]
-# MIT Licens
+# MIT License
 from functools import wraps
 import logging
 import logging.handlers

@@ -1,3 +1,4 @@
+# 该文件的提示词文本已经是落后的版本，请自由设定修改
 from libs.prompt_manager import PromptManagerRebuild, PromptSection
 
 

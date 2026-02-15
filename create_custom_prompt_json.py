@@ -1,5 +1,5 @@
-from libs.prompt_manager import PromptManagerRebuild, PromptSection
 import os
+from libs.prompt_manager import PromptManagerRebuild, PromptSection
 # 作用域AREA
 # 'start' :首轮对话
 # 'continue' :后续对话
