@@ -9,7 +9,7 @@ import os
 import logging
 import gzip
 from collections import deque
-from typing import Optional
+from typing import Optional, Dict, List
 from datetime import datetime
 import openai
 from rich import print
@@ -532,14 +532,45 @@ class GameEngine:
     # 保存-管理自动存档
     @log_exceptions(logger)
     def manage_auto_saves(self, save_name="autosave"):
-        """管理自动保存，只保留最近的15个存档"""
+        """管理自动保存，每回合仅保留1个最新存档，且整体只保留最近的15个存档"""
         save_dir = "saves"
         game_save_dir = os.path.join(save_dir, self.game_id)
 
         if not os.path.exists(game_save_dir):
             return
 
-        # 获取所有自动保存文件
+        # 辅助函数：读取存档文件获取回合数
+        def get_turn_and_timestamp(filename: str) -> tuple:
+            filepath = os.path.join(game_save_dir, filename)
+            total_turns = None
+            # 提取文件时间戳（原逻辑）
+            timestamp = get_file_timestamp(filename)
+
+            # 读取存档文件获取回合数
+            try:
+                if filename.endswith('.json.gz'):
+                    with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                        data = json.load(f)
+                        total_turns = data.get("total_turns")
+                elif filename.endswith('.json'):
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        total_turns = data.get("total_turns")
+            except (json.JSONDecodeError, OSError, Exception) as e:
+                logger.warning("读取文件%s的回合数失败: %s", filename, str(e))
+
+            # 回合数为None时用特殊值，避免分组异常
+            return (total_turns if total_turns is not None else -1, timestamp, filename)
+
+        # 辅助函数：提取文件时间戳（复用原逻辑）
+        def get_file_timestamp(filename: str) -> str:
+            parts = filename.replace('.json', '').replace('.gz', '').split('_')
+            for part in parts:
+                if len(part) == 15 and part[:8].isdigit() and part[9:].isdigit():
+                    return part
+            return filename
+
+        # 1. 筛选符合条件的自动存档文件
         auto_save_files = []
         for f in os.listdir(game_save_dir):
             if (f.startswith(save_name) and
@@ -550,24 +581,45 @@ class GameEngine:
                 auto_save_files.append(f)
         logger.info("找到了%s个自动保存文件", len(auto_save_files))
 
-        if len(auto_save_files) > 5:
-            def get_file_timestamp(filename):
-                parts = filename.replace(
-                    '.json', '').replace('.gz', '').split('_')
-                for part in parts:
-                    if len(part) == 15 and part[:8].isdigit() and part[9:].isdigit():
-                        return part
-                return filename
+        if not auto_save_files:
+            return
 
-            auto_save_files.sort(key=get_file_timestamp)
-            files_to_delete = auto_save_files[:-15]
+        # 2. 按回合数分组，每组保留最新的文件（按时间戳排序）
+        turn_groups: Dict[int, List[tuple]] = {}
+        for file in auto_save_files:
+            turn, ts, fname = get_turn_and_timestamp(file)
+            if turn not in turn_groups:
+                turn_groups[turn] = []
+            turn_groups[turn].append((ts, fname))
 
-            for filename in files_to_delete:
-                filepath = os.path.join(game_save_dir, filename)
+        # 提取每个回合的最新文件（时间戳最大的）
+        unique_turn_files = []
+        for turn, files in turn_groups.items():
+            if turn == -1:  # 无法读取回合数的文件，保留原逻辑
+                unique_turn_files.extend([f[1] for f in files])
+            else:
+                # 按时间戳排序，取最新的一个
+                files_sorted = sorted(files, key=lambda x: x[0])
+                unique_turn_files.append(files_sorted[-1][1])
+
+        # 3. 在去重后的文件中，保留最近的15个（按时间戳排序）
+        unique_turn_files_sorted = sorted(
+            unique_turn_files, key=get_file_timestamp)
+        files_to_keep = unique_turn_files_sorted[-15:] if len(
+            unique_turn_files_sorted) > 15 else unique_turn_files_sorted
+        files_to_delete = [
+            f for f in auto_save_files if f not in files_to_keep]
+
+        # 4. 删除多余文件
+        for filename in files_to_delete:
+            filepath = os.path.join(game_save_dir, filename)
+            try:
                 os.remove(filepath)
                 logger.info("自动删除旧存档: %s", filepath)
-
+            except OSError as e:
+                logger.error("删除文件%s失败: %s", filepath, str(e))
     # 保存-保存游戏
+
     @log_exceptions(logger)
     def save_game(self, save_name="autosave", is_manual_save=False):
         """
