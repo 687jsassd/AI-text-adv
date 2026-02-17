@@ -109,7 +109,7 @@ class GameEngine:
         self.current_user_input = ""
 
         # 摘要压缩部分
-        self.summary_conclude_val = 24  # 当历史剧情超过24条时，对其进行压缩总结;所有摘要都会参与剧情生成.
+        self.summary_conclude_val = 20  # 当历史剧情超过20条时，对其进行压缩总结;所有摘要都会参与剧情生成.
         self.conclude_summary_cooldown = 10
         self.compressed_summary_textmin = 320  # 可认为为压缩摘要时的最小长度
 
@@ -1122,6 +1122,65 @@ class GameEngine:
         def cmd_save():
             self.manual_save()
 
+        def cmd_prev_turn():
+            """回到上一回合存档"""
+            current_turns = len(self.history_descriptions)
+
+            if current_turns <= 1:
+                print(" 当前已是第一回合，无法回到上一回合！")
+                return
+
+            target_turn = current_turns - 1
+            save_dir = "saves"
+            game_save_dir = os.path.join(save_dir, self.game_id)
+
+            if not os.path.exists(game_save_dir):
+                print(f" 未找到游戏ID {self.game_id} 的存档目录！")
+                return
+
+            candidate_saves = []
+            for filename in os.listdir(game_save_dir):
+                # 过滤非存档文件
+                if not filename.endswith(('.json', '.json.gz')) or filename.startswith('.'):
+                    continue
+
+                filepath = os.path.join(game_save_dir, filename)
+                try:
+                    # 读取存档文件（兼容压缩/非压缩格式）
+                    if filename.endswith('.gz'):
+                        with gzip.open(filepath, 'rt', encoding='utf-8') as f:
+                            save_data = json.load(f)
+                    else:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            save_data = json.load(f)
+
+                    # 匹配目标回合数
+                    save_turns = save_data.get("total_turns", 0)
+                    if save_turns == target_turn:
+                        # 记录存档时间戳和路径，用于后续选最新的
+                        timestamp = datetime.fromisoformat(
+                            save_data["timestamp"])
+                        candidate_saves.append((timestamp, filepath))
+                except Exception as e:
+                    logger.warning(" 解析存档文件 %s 失败: %s", filename, e)
+                    continue
+
+            if not candidate_saves:
+                print(f" 未找到第 {target_turn} 回合的存档！")
+                return
+
+            candidate_saves.sort(key=lambda x: x[0], reverse=True)
+            _, latest_file = candidate_saves[0]
+
+            # 加载找到的存档
+            success, message = self.load_game(
+                filename=os.path.basename(latest_file),
+                game_id=self.game_id
+            )
+            print(f"\n{message}")
+            if not success:
+                print(f"加载第 {target_turn} 回合存档失败！")
+
         def cmd_conclude_summary():
             self.go_game("", True)
             print("总结完成")
@@ -1130,12 +1189,13 @@ class GameEngine:
         cmd_manager.reg("mod",
                         self.prompt_manager.action_menu, "管理自定义提示词")
         cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
-        cmd_manager.reg("preference_view", cmd_preference_view, "配置显示偏好")
+        cmd_manager.reg("back", cmd_prev_turn, "回到上一回合")
+        cmd_manager.reg("viewsys", cmd_preference_view, "配置显示偏好")
         cmd_manager.reg("config", cmd_config, "配置游戏")
         cmd_manager.reg("load", cmd_load, "读取存档")
         cmd_manager.reg("save", cmd_save, "保存")
         cmd_manager.reg("summary", cmd_summary, "查看当前剧情摘要")
-        cmd_manager.reg("conclude_summary", cmd_conclude_summary, "总结摘要")
+        cmd_manager.reg("conclude", cmd_conclude_summary, "总结摘要")
         cmd_manager.reg("new", lambda: 1, "开始新游戏")
         cmd_manager.reg("exit", lambda: 1, "退出游戏")
 
