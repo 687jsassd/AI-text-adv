@@ -129,12 +129,13 @@ class CustomConfig:
         providers_dict = {}
         try:
             for key, provider_info in self.llm_api_config.get("api_providers", {}).items():
+                price_raw = provider_info.get("price")
                 providers_dict[int(key)] = {
                     "name": provider_info.get("name", "未命名"),
                     "base_url": provider_info.get("base_url", ""),
                     "api_key": provider_info.get("api_key", ""),
                     "model": provider_info.get("model", ""),
-                    "price": tuple(map(float, provider_info.get("price", "0-0").split("-")))
+                    "price": tuple(map(float, price_raw.split("-"))) if isinstance(price_raw, str) else price_raw
                 }
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             print(f"转换API提供商配置时出错: {e}")
