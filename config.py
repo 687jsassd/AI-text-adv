@@ -112,7 +112,8 @@ class CustomConfig:
                             "name": "默认提供商(请在config/llm_api_config.json中配置)",
                             "base_url": "your-base-url",
                             "api_key": "your-api-key",
-                            "model": "your-model-name"
+                            "model": "your-model-name",
+                            "price": "0-0"
                         }
                     },
                     "api_provider_choice": 0
@@ -132,7 +133,8 @@ class CustomConfig:
                     "name": provider_info.get("name", "未命名"),
                     "base_url": provider_info.get("base_url", ""),
                     "api_key": provider_info.get("api_key", ""),
-                    "model": provider_info.get("model", "")
+                    "model": provider_info.get("model", ""),
+                    "price": tuple(map(float, provider_info.get("price", "0-0").split("-")))
                 }
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             print(f"转换API提供商配置时出错: {e}")
@@ -141,7 +143,8 @@ class CustomConfig:
                 "name": "默认提供商(请在config/llm_api_config.json中配置)",
                 "base_url": "your-base-url",
                 "api_key": "your-api-key",
-                "model": "your-model-name"
+                "model": "your-model-name",
+                "price": "0-0"
             }}
         return providers_dict
 

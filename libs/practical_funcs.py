@@ -55,6 +55,8 @@ def text_colorize(text: str):
         "《": COLOR_RED,
         "「": COLOR_GREEN,
         "【": COLOR_BLUE,
+        "‘": COLOR_YELLOW,
+        "“": COLOR_YELLOW,
     }
     close_chars = {
         ">": "<",
@@ -63,6 +65,8 @@ def text_colorize(text: str):
         "》": "《",
         "」": "「",
         "】": "【",
+        "’": "‘",
+        "”": "“",
     }
     # 从开始向字符串末尾逐字符扫描替换
     for i in text:

@@ -34,19 +34,47 @@ VERSION = "Reborn-v0.1.9"
 class ExtraData:
     """
     引擎用，额外数据，存储回合数等必要的需要持久化的信息
+    务必添加可以被json序列化的额外数据,否则会导致持久化失败
     """
 
     def __init__(self):
-        self.turns = 0
+        self.turns = 0  # 示例:回合数
 
-        # 不参与持久化
-        self.show_init_resp = False
+        self.datas = {
+            "preference_view_settings": {  # 显示偏好
+                'show_init_resp': False,  # 显示原本AI相应
+                'show_word_count': True,  # 显示字数
+                'show_token_consume': True,  # 显示Token消耗
+                'show_fee': True,  # 显示费用
+                'show_game_id': True,  # 显示游戏ID
+                'show_game_version': True,  # 显示游戏版本
+                'show_model_name': True,  # 显示模型名称
+                'show_mod_count': True,  # 显示加载的Mod数量
+            }
+        }
+
+    def set_data(self, key: str, value, is_del=False):
+        """
+        设置额外数据
+        """
+        if is_del:
+            if key in self.datas:
+                del self.datas[key]
+        else:
+            self.datas[key] = value
+
+    def get_data(self, key: str, default=None):
+        """
+        获取额外数据
+        """
+        return self.datas.get(key, default)
 
     def read_from_dict(self, extra_datas: dict):
         """
         从字典读取额外数据
         """
         self.turns = extra_datas.get("turns", 0)
+        self.datas.update(extra_datas.get("extra_datas", {}))
 
     def to_dict(self) -> dict:
         """
@@ -54,6 +82,7 @@ class ExtraData:
         """
         return {
             "turns": self.turns,
+            "extra_datas": self.datas,
         }
 
 
@@ -503,7 +532,7 @@ class GameEngine:
     # 保存-管理自动存档
     @log_exceptions(logger)
     def manage_auto_saves(self, save_name="autosave"):
-        """管理自动保存，只保留最近的5个存档"""
+        """管理自动保存，只保留最近的15个存档"""
         save_dir = "saves"
         game_save_dir = os.path.join(save_dir, self.game_id)
 
@@ -531,7 +560,7 @@ class GameEngine:
                 return filename
 
             auto_save_files.sort(key=get_file_timestamp)
-            files_to_delete = auto_save_files[:-5]
+            files_to_delete = auto_save_files[:-15]
 
             for filename in files_to_delete:
                 filepath = os.path.join(game_save_dir, filename)
@@ -1005,10 +1034,28 @@ class GameEngine:
         def cmd_ana_token():
             analyze_token_consume(self.token_consumes)
 
-        def cmd_show_init_resp():
-            self.extra_data.show_init_resp = not self.extra_data.show_init_resp
-            print(f"将显示AI原始响应与Token信息：{self.extra_data.show_init_resp}")
-            return self.extra_data.show_init_resp
+        def cmd_preference_view():
+            while True:
+                clear_screen()
+                preference_view_settings = self.extra_data.datas.get(
+                    "preference_view_settings", {})
+                print("\n===== 显示偏好配置 =====")
+                for id, (key, value) in enumerate(preference_view_settings.items()):
+                    print(f"{id+1}. {key}: {value}")
+                print("输入要配置的序号以切换开关，或者exit以退出配置")
+                ipt = input("::")
+                if ipt == "exit":
+                    return
+                try:
+                    idx = int(ipt) - 1
+                    if 0 <= idx < len(preference_view_settings):
+                        key = list(preference_view_settings.keys())[idx]
+                        preference_view_settings[key] = not preference_view_settings[key]
+                        print(f"将 {key} 切换为 {preference_view_settings[key]}")
+                    else:
+                        print("无效的序号")
+                except ValueError:
+                    print("请输入有效的序号")
 
         def cmd_config():
             self.custom_config.config_game()
@@ -1031,7 +1078,7 @@ class GameEngine:
         cmd_manager.reg("mod",
                         self.prompt_manager.action_menu, "管理自定义提示词")
         cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
-        cmd_manager.reg("show_init_resp", cmd_show_init_resp, "切换显示原始AI回复")
+        cmd_manager.reg("preference_view", cmd_preference_view, "配置显示偏好")
         cmd_manager.reg("config", cmd_config, "配置游戏")
         cmd_manager.reg("load", cmd_load, "读取存档")
         cmd_manager.reg("save", cmd_save, "保存")
@@ -1040,7 +1087,7 @@ class GameEngine:
         cmd_manager.reg("new", lambda: 1, "开始新游戏")
         cmd_manager.reg("exit", lambda: 1, "退出游戏")
 
-        return self.extra_data.show_init_resp
+        return self.extra_data.datas.get("preference_view_settings", {}).get("show_init_resp", False)
 
     # 游戏日志-记录游戏
     def log_game_file(self, log_file: str):

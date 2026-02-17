@@ -101,8 +101,8 @@ def new_game(no_auto_load=False):
     """
     game_instance = GameEngine(config)
 
-    def show_init_resp():
-        return game_instance.extra_data.show_init_resp
+    def preference_view():
+        return game_instance.extra_data.datas.get("preference_view_settings", {})
     no_save_again_sign = False
 
     def init_turn_datas():
@@ -140,10 +140,39 @@ def new_game(no_auto_load=False):
         print_all_history(game_instance)
         print(text_colorize(game_instance.current_description))
         game_instance.print_all_messages_await()
-        print(
-            f"字数:{sum([len(it) for it in game_instance.history_descriptions])} | Token/all:{game_instance.l_c_token+game_instance.l_p_token}/{game_instance.total_tokens} | Ver:{VERSION} | [{game_instance.game_id}] | {len(game_instance.prompt_manager.loaded_prompt_jsons)} mods loaded")
+        wait_to_screen = []
+        if preference_view().get("show_word_count", True):
+            wait_to_screen.append(
+                f"字数:{sum([len(it) for it in game_instance.history_descriptions])}")
+        if preference_view().get("show_token_consume", True):
+            wait_to_screen.append(
+                f"RollToken/all:{game_instance.l_c_token+game_instance.l_p_token}/{game_instance.total_tokens}")
+        if preference_view().get("show_fee", True):
+            prompt_fee = game_instance.total_prompt_tokens * \
+                game_instance.custom_config.get_current_provider()[
+                    'price'][0] / 1000000
+            completion_fee = game_instance.total_completion_tokens * \
+                game_instance.custom_config.get_current_provider()[
+                    'price'][1] / 1000000
+            wait_to_screen.append(
+                f"费用估计:I={prompt_fee:.3f} O={completion_fee:.3f} ALL={prompt_fee+completion_fee:.3f}")
+        if preference_view().get("show_game_id", True):
+            wait_to_screen.append(
+                f"[{game_instance.game_id}]")
+        if preference_view().get("show_game_version", True):
+            wait_to_screen.append(
+                f"Ver:{VERSION}")
+        if preference_view().get("show_model_name", True):
+            wait_to_screen.append(
+                f"Model:{game_instance.custom_config.get_current_provider()['model']}")
+        if preference_view().get("show_mod_count", True):
+            wait_to_screen.append(
+                f"{len(game_instance.prompt_manager.loaded_prompt_jsons)} mods loaded")
 
-        if show_init_resp():
+        if wait_to_screen:
+            print(" | ".join(wait_to_screen))
+
+        if preference_view().get("show_init_resp", False):
             print(game_instance.current_response)
             print(game_instance.get_token_stats())
 
@@ -177,7 +206,6 @@ def main():
         game_title = GameTitle()
         game_title.show()
         input()  # 用于捕获标题时玩家按的回车
-
     no_auto_load = False
     while True:
         i = new_game(no_auto_load)
