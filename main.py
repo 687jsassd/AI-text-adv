@@ -41,11 +41,11 @@ config = CustomConfig()
 
 
 # 自定义行动的处理
-def custom_action_func(game: GameEngine, skip_inputs=('help',)):
+def custom_action_func(game: GameEngine, skip_inputs=('cmd',)):
     """
     自定义行动
     """
-    print(f"输入 /指令 以使用指令,如/help\n {COLOR_YELLOW}你决定{COLOR_RESET}")
+    print(f"输入 /指令 以使用指令,如/cmd\n {COLOR_YELLOW}你决定{COLOR_RESET}")
     custom_action = get_multiline_input()
     if custom_action in skip_inputs:
         print(f"{COLOR_RED}提示：为了避免误输入，建议使用 /+指令 来进行指令{COLOR_RESET}\n指令将继续执行，按任意键继续")
@@ -95,7 +95,7 @@ def print_all_history(game: GameEngine, back_range: int = 50):
         console.rule(style="white")
 
 
-def new_game(no_auto_load=False):
+def new_game(no_auto_load=False, renew_game=False):
     """
     主游戏逻辑
     """
@@ -122,18 +122,28 @@ def new_game(no_auto_load=False):
         loadsuccess = False
 
     if not loadsuccess:  # 新游戏逻辑
-        input("按任意键开始新游戏")
-        game_instance.custom_config.config_game()
-        game_instance = GameEngine(config)  # 防止部分配置未加载
-        game_instance.game_id = input("为本局游戏命名(或留空随机)：\n::").strip()
-        st_story = input('输入开局故事(留空随机）:\n:: ')
-        game_instance.anime_loader.start_animation(
-            "spinner", message="*等待<世界>回应*")
-        game_instance.start_game(st_story)
-        game_instance.anime_loader.stop_animation()
-        # 游戏ID
-        if not game_instance.game_id:
+        if not renew_game:
+            input("按任意键开始新游戏")
+            game_instance.custom_config.config_game()
+            game_instance = GameEngine(config)  # 防止部分配置未加载
+            game_instance.game_id = input("为本局游戏命名(或留空随机)：\n::").strip()
+            st_story = get_multiline_input('输入开局故事(留空随机）\n::')
+            game_instance.anime_loader.start_animation(
+                "spinner", message="*等待<世界>回应*")
+            game_instance.start_game(st_story)
+            game_instance.anime_loader.stop_animation()
+            # 游戏ID
+            if not game_instance.game_id:
+                game_instance.game_id = generate_game_id()
+        else:
+            print("正在重新从头生成")
+            game_instance = GameEngine(config)  # 防止部分配置未加载
             game_instance.game_id = generate_game_id()
+            st_story = get_multiline_input('输入开局故事(留空随机）\n::')
+            game_instance.anime_loader.start_animation(
+                "spinner", message="*等待<世界>回应*")
+            game_instance.start_game(st_story)
+            game_instance.anime_loader.stop_animation()
 
     while True:
         clear_screen()
@@ -188,6 +198,8 @@ def new_game(no_auto_load=False):
             return 'exit'
         elif user_input == "new":
             return 'new_game'
+        elif user_input == "renew":
+            return 'renew_game'
         elif user_input in commands:  # pylint: disable=unsupported-membership-test
             CommandManager.run(  # pylint: disable=no-value-for-parameter
                 user_input)
@@ -207,12 +219,18 @@ def main():
         game_title.show()
         input()  # 用于捕获标题时玩家按的回车
     no_auto_load = False
+    renew_game = False
     while True:
-        i = new_game(no_auto_load)
+        i = new_game(no_auto_load, renew_game)
         if i == 'exit':
             break
         elif i == 'new_game':
             no_auto_load = True
+            renew_game = False
+            continue
+        elif i == 'renew_game':
+            no_auto_load = True
+            renew_game = True
             continue
         else:
             print("新的开始...")

@@ -19,7 +19,7 @@ from libs.animes import SyncLoadingAnimation
 from libs.logger import log_exceptions
 from libs.prompt_manager import PromptSection, PromptManager
 from libs.replace_manager import TextReplaceManager
-from libs.practical_funcs import generate_game_id, find_file_by_name, clear_screen
+from libs.practical_funcs import generate_game_id, find_file_by_name, clear_screen, get_multiline_input
 from libs.event_manager import CommandManager
 from libs.token_ana import analyze_token_consume
 
@@ -28,7 +28,7 @@ AnimeLoader = SyncLoadingAnimation()
 ReplaceManager = TextReplaceManager()
 CommandManager = CommandManager()
 
-VERSION = "Reborn-v0.1.9"
+VERSION = "Reborn-v0.2.0"
 
 
 class ExtraData:
@@ -38,7 +38,7 @@ class ExtraData:
     """
 
     def __init__(self):
-        self.turns = 0  # 示例:回合数
+        self.turns = 1  # 示例:回合数
 
         self.datas = {
             "preference_view_settings": {  # 显示偏好
@@ -1185,21 +1185,124 @@ class GameEngine:
             self.go_game("", True)
             print("总结完成")
 
-        cmd_manager.reg("help", cmd_manager.list_cmds, "列出所有指令")
+        def for_cmd_custom_nonext_actions(prompt_path: str,
+                                          is_need_input: bool = True,
+                                          input_prompt: str = "你思索这样一个问题：\n::",
+                                          loading_message: str = "等待<世界>回应",
+                                          attach_pre_text: str = "[思考:<ipt>]"):
+            """
+            不进行回合推进的自定义行动的工厂函数
+            :param prompt_path: 提示词文件路径
+            :param is_need_input: 是否需要用户输入
+            :param input_prompt: 用户输入提示
+            :param loading_message: 加载中提示
+            :param attach_pre_text: 对原剧情文本后附加什么前缀文本(使用<ipt>表示用户输入)
+            """
+            logger.info("注册自定义不推进回合行动 %s", prompt_path)
+            # 注册提示词管理器
+            self.prompt_manager.del_prompt_manager('tmp_custom_action_nonext')
+            self.prompt_manager.add_prompt_manager(
+                'tmp_custom_action_nonext', prompt_path)
+            # 获取用户输入
+            ipt = ""
+            if is_need_input:
+                ipt = get_multiline_input(input_prompt)
+                if not ipt.strip():
+                    return
+            self.current_user_input = ipt
+            prompt = self.prompt_manager.get(
+                'tmp_custom_action_nonext').get_full_prompt()
+            prompt = ReplaceManager.replace(prompt)
+            if not prompt:
+                logger.error("[自定义不推进回合行动]中 %s 路径提示词下，prompt为空", prompt_path)
+                return
+            self.anime_loader.stop_animation()
+            self.anime_loader.start_animation(
+                "spinner", message=loading_message)
+            ai_response = self.call_ai(prompt)
+            self.anime_loader.stop_animation()
+            if ai_response:
+                self.current_description += '\n' + \
+                    attach_pre_text.replace('<ipt>', ipt)+ai_response
+                self.history_descriptions[-1] = self.current_description
+                self.token_consumes[-1] += self.l_p_token+self.l_c_token
+
+        def cmd_action_think():
+            for_cmd_custom_nonext_actions(
+                prompt_path="./prompts/think_prompt.json",
+                is_need_input=True,
+                input_prompt="你思索这样一个问题：\n::",
+                loading_message="思索中...",
+                attach_pre_text="[思考:<ipt>]")
+
+        def cmd_action_options():
+            for_cmd_custom_nonext_actions(
+                prompt_path="./prompts/options_prompt.json",
+                is_need_input=False,
+                loading_message="思索可能行动中...",
+                attach_pre_text="[可能的行动]")
+
+        def cmd_action_help():
+            for_cmd_custom_nonext_actions(
+                prompt_path="./prompts/help_prompt.json",
+                is_need_input=True,
+                input_prompt="你需要的剧情帮助是：\n::",
+                loading_message="解答中...",
+                attach_pre_text="[帮助:<ipt>]")
+
+        def cmd_re():
+            # 重新生成本轮
+            # 如果第一轮，提示使用renew
+            if self.extra_data.turns <= 1:
+                print("[重新生成使用错误]: 这是第一轮，请使用/renew或/new重新开始")
+                return
+            # 从history_choices中获取上一轮选择
+            last_choice = self.history_choices[-1]
+            # 获取本轮摘要(用于规范剧情)
+            last_summary = self.history_simple_summaries[-1]
+            # 用户输入剧情的改变方向
+            guideline = get_multiline_input(
+                "输入期望的剧情改变方向(或留空随机)：\n::").strip()
+            if guideline:
+                # 临时给config中的用户自定义的body中添加改变方向的提示
+                added_text = f"\n用户希望在这样的剧情大纲:[{last_summary}]的参考或者对比下，再严格进行下面的改善:{guideline},你严格按照用户要求调整纲要，再遵循其他所有规则生成完整剧情。"
+                tmp_body = self.custom_config.custom_prompts['body']
+                self.custom_config.custom_prompts['body'] += added_text
+
+            # 删除现有的最新历史剧情、选择、摘要、token消耗
+            self.history_choices.pop()
+            self.history_descriptions.pop()
+            self.history_simple_summaries.pop()
+            self.token_consumes.pop()
+            self.conclude_summary_cooldown += 1
+            # 重新生成
+            self.go_game(last_choice)
+
+            if guideline:
+                self.custom_config.custom_prompts['body'] = tmp_body
+
+        cmd_manager.reg("cmd", cmd_manager.list_cmds, "列出所有指令")
+        # mod
         cmd_manager.reg("mod",
                         self.prompt_manager.action_menu, "管理自定义提示词")
+        # 自定义行动
+        cmd_manager.reg("think", cmd_action_think, "思考")
+        cmd_manager.reg("help", cmd_action_help, "获得剧情帮助")
+        cmd_manager.reg("option", cmd_action_options, "获得剧情的下一步行动建议")
+        # token分析和配置
         cmd_manager.reg("ana_token", cmd_ana_token, "进行token消耗分析")
-        cmd_manager.reg("back", cmd_prev_turn, "回到上一回合")
         cmd_manager.reg("viewsys", cmd_preference_view, "配置显示偏好")
         cmd_manager.reg("config", cmd_config, "配置游戏")
+        # 基本操作
+        cmd_manager.reg("re", cmd_re, "重新生成本轮")
+        cmd_manager.reg("back", cmd_prev_turn, "回到上一回合的存档")
         cmd_manager.reg("load", cmd_load, "读取存档")
         cmd_manager.reg("save", cmd_save, "保存")
         cmd_manager.reg("summary", cmd_summary, "查看当前剧情摘要")
         cmd_manager.reg("conclude", cmd_conclude_summary, "总结摘要")
         cmd_manager.reg("new", lambda: 1, "开始新游戏")
+        cmd_manager.reg("renew", lambda: 1, "以当前配置从零重开")
         cmd_manager.reg("exit", lambda: 1, "退出游戏")
-
-        return self.extra_data.datas.get("preference_view_settings", {}).get("show_init_resp", False)
 
     # 游戏日志-记录游戏
     def log_game_file(self, log_file: str):

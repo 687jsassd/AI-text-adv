@@ -176,6 +176,120 @@ def create_summary_prompt():
     print(prompt_manager.get_full_prompt())
 
 
-create_start_prompt()
-create_continue_prompt()
-create_summary_prompt()
+def create_prompt_for_think():
+    # 创建思考提示词
+    prompt_manager = PromptManagerRebuild()
+    init_prompt = {
+        PromptSection.PRE_PROMPT: """
+你现在模拟沉浸式文字游戏的主角{game:player_name}进行思考，
+根据之前的剧情历史和当前场景，从主角的视角出发，对[{game:current_user_input}]这个疑问进行思考和联想。
+主角不是全知视角或者上帝视角，一切推理和判断必须符合历史经历和逻辑。
+以第一人称视角思考，用'我'代指主角。
+不可透露任何游戏相关机制词语，如保存游戏，获得物品等。
+""",
+
+        PromptSection.BODY_PROMPT: """
+【相关信息】
+[主角背景/描述]：{game:player_story}
+【剧情历史】
+{game:pre_3_all_summary}
+{game:last_3_desc}
+
+【当前场景】
+{game:current_desc}
+""",
+
+        PromptSection.POST_PROMPT: """
+【输出要求】
+直接输出思考内容，不带前后缀，不超过200字。
+"""
+    }
+    prompt_manager.load_init_sections(init_prompt)
+    prompt_manager.save_to_json(
+        "./prompts/think_prompt.json", id="_INITIAL_THINK")
+
+    prompt_manager = PromptManagerRebuild("./prompts/think_prompt.json")
+    print(prompt_manager.get_full_prompt())
+
+
+def create_prompt_for_options():
+    # 创建选项推荐提示词
+    prompt_manager = PromptManagerRebuild()
+    init_prompt = {
+        PromptSection.PRE_PROMPT: """
+你现在是一个沉浸式文字游戏的辅助助手，
+根据之前的剧情历史，从主角的视角出发，给出在当前场景下主角的几个可能行动选项建议。
+要求：
+1.选项必须可尝试、可执行，且不是庞大设想或者抽象的想法。
+2.选项具有多样化，可以涵盖推进剧情、走向分支、不参与事件等不同走向，也可以涵盖娱乐选项等。
+3.不可透露任何游戏相关机制词语，如保存游戏，获得物品等。
+""",
+
+        PromptSection.BODY_PROMPT: """
+【相关信息】
+[主角背景/描述]：{game:player_story}
+【剧情历史】
+{game:pre_3_all_summary}
+{game:last_3_desc}
+
+【当前场景】
+{game:current_desc}
+""",
+
+        PromptSection.POST_PROMPT: """
+【输出要求】
+直接以换行符为分隔符输出1-7个可能行动的建议，不带前后缀，每个不超过25字。
+"""
+    }
+    prompt_manager.load_init_sections(init_prompt)
+    prompt_manager.save_to_json(
+        "./prompts/options_prompt.json", id="_INITIAL_OPTIONS")
+
+    prompt_manager = PromptManagerRebuild("./prompts/options_prompt.json")
+    print(prompt_manager.get_full_prompt())
+
+
+def create_prompt_for_help():
+    # 创建剧情帮助提示词
+    prompt_manager = PromptManagerRebuild()
+    init_prompt = {
+        PromptSection.PRE_PROMPT: """
+你现在是一个沉浸式文字游戏的辅助助手，
+根据之前的剧情历史，回答玩家关于[{game:current_user_input}]的疑问。
+要求：
+1.回答必须符合历史经历和逻辑，不能是抽象或者脱离场景的回答。
+2.不可剧透，必须严格按照已有经历和知识回答。
+3.回答只能局限在剧情中，不可超出场景范围，不可涉及游戏机制。
+4.在一次性讲清楚讲明白的前提下，尽可能简洁明了，别说废话或者水字数。
+""",
+
+        PromptSection.BODY_PROMPT: """
+【相关信息】
+[主角背景/描述]：{game:player_story}
+【剧情历史】
+{game:pre_3_all_summary}
+{game:last_3_desc}
+
+【当前场景】
+{game:current_desc}
+""",
+
+        PromptSection.POST_PROMPT: """
+【输出要求】
+直接输出回答，不带前后缀，不超过500字。
+"""
+    }
+    prompt_manager.load_init_sections(init_prompt)
+    prompt_manager.save_to_json(
+        "./prompts/help_prompt.json", id="_INITIAL_HELP")
+
+    prompt_manager = PromptManagerRebuild("./prompts/help_prompt.json")
+    print(prompt_manager.get_full_prompt())
+
+
+# create_start_prompt()
+# create_continue_prompt()
+# create_summary_prompt()
+create_prompt_for_think()
+create_prompt_for_options()
+create_prompt_for_help()
